@@ -45,10 +45,13 @@ where H: PredictionHandler<I, O> {
 
         let feat = &stack[0];
 
-        match self.children.get(&feat.value) {
-            Some(child) => child.predict(&stack[1..]),
-            None => self.handler.predict()
+        if let Some(child) = self.children.get(&feat.value) {
+            if let Some(prediction) = child.predict(&stack[1..]) {
+                return Some(prediction)
+            }
         }
+
+        self.handler.predict()
     }
 
     pub(crate) fn should_prune(&self) -> bool {
