@@ -1,22 +1,27 @@
+use std::marker::PhantomData;
 use std::sync::Arc;
-use papaya::HashMap;
+use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use crate::{Feature, Value};
 use crate::handler::PredictionHandler;
 
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "H: Serialize",
+    deserialize = "H: DeserializeOwned"
+))]
 pub(crate) struct Node<I, O, H>
 where H: PredictionHandler<I, O> {
     pub handler: Arc<H>,
-    pub children: HashMap<Value, Node<I, O, H>>
+    pub children: DashMap<Value, Node<I, O, H>>,
+    _phantom: PhantomData<(I, O)>,
 }
 
 impl<I, O, H> Node<I, O, H>
 where H: PredictionHandler<I, O> {
     pub fn new(handler: Arc<H>) -> Node<I, O, H> {
-        Node { handler, children: HashMap::with_capacity(0) }
-    }
-
-    pub(crate) fn new_with_children(handler: Arc<H>, children: HashMap<Value, Node<I, O, H>>) -> Self {
-        Node { handler, children }
+        Node { handler, children: DashMap::with_capacity(0), _phantom: PhantomData }
     }
 
     pub fn train(&self, stack: &[Feature], input: &I) -> () {
@@ -28,10 +33,9 @@ where H: PredictionHandler<I, O> {
 
         let feat = &stack[0];
 
-        let child_map = self.children.pin();
-        child_map.get_or_insert_with(feat.value.clone(),
-                                     || Node::new(Arc::new(self.handler.new_instance()))
-        ).train(&stack[1..], input);
+        self.children.entry(feat.value.clone())
+            .or_insert_with(|| { Node::new(Arc::new(self.handler.new_instance())) })
+            .train(&stack[1..], input);
     }
 
     pub fn predict(&self, stack: &[Feature]) -> Option<O> {
@@ -41,8 +45,7 @@ where H: PredictionHandler<I, O> {
 
         let feat = &stack[0];
 
-        let child_map = self.children.pin();
-        match child_map.get(&feat.value) {
+        match self.children.get(&feat.value) {
             Some(child) => child.predict(&stack[1..]),
             None => self.handler.predict()
         }
@@ -63,7 +66,7 @@ where H: PredictionHandler<I, O> {
         }
 
         // remove any individual nodes we should prune
-        self.children.pin().retain(|_, node| {
+        self.children.retain(|_, node| {
             !node.should_prune()
         });
 
@@ -77,8 +80,7 @@ where H: PredictionHandler<I, O> {
             return 1;
         }
 
-        let child_sz: u32 = self.children.pin().
-            values().into_iter()
+        let child_sz: u32 = self.children.iter()
             .map(|node| node.size(leaf_only))
             .sum();
 

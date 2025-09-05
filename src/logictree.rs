@@ -1,12 +1,11 @@
 use std::string::ToString;
 use std::sync::Arc;
-use papaya::HashMap;
-use std::collections::HashMap as StdHashMap;
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use serde::de::DeserializeOwned;
 use crate::feature::Value;
 use crate::node::Node;
 use crate::{Feature, PredictionHandler};
-use crate::serialization::{SerializableNode, SerializableTree};
 
 /// A high-performance decision tree that accumulates outcomes at each node and
 /// enables the user to define complex prediction logic, while supporting online learning.
@@ -14,17 +13,21 @@ use crate::serialization::{SerializableNode, SerializableTree};
 /// The tree traverses features in a predefined order, with each node containing
 /// a user-defined [`PredictionHandler`] that manages training and prediction logic.
 /// Thread-safe for concurrent training and prediction operations
+#[derive(Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "H: Serialize, Node<I, O, H>: Serialize",
+    deserialize = "H: DeserializeOwned, Node<I, O, H>: for<'a> Deserialize<'a>"
+))]
 pub struct LogicTree<I, O, H>
 where H: PredictionHandler<I, O>
 {
     features: Vec<String>,
-    root: HashMap<Value, Node<I, O, H>>,
+    root: DashMap<Value, Node<I, O, H>>,
 }
 
 impl <I, O, H> LogicTree<I, O, H>
 where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
 {
-
     fn root_value() -> Value {
         Value::String("root".to_string())
     }
@@ -34,48 +37,32 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     /// layout. For example, typically lower cardinality
     /// features may be placed first.
     pub fn new(features: Vec<String>, handler: H) -> LogicTree<I, O, H> {
-        let map = HashMap::new();
+        let map = DashMap::new();
 
-        map.insert(Self::root_value(), Node::new(Arc::new(handler.new_instance())), &map.guard());
+        map.insert(Self::root_value(), Node::new(Arc::new(handler.new_instance())));
 
         LogicTree { features, root: map }
     }
 
-    /// Serialize this tree and its current state to the provided output file path
-    pub fn save(&self, path: &str) -> Result<(), String> {
-        let guard = self.root.guard();
-        let mut root_map = StdHashMap::new();
-
-        for (key, node) in self.root.iter(&guard) {
-            root_map.insert(key.clone(), SerializableNode::from_node(node));
-        }
-
-        let tree = SerializableTree {
-            features: self.features.clone(),
-            root: root_map,
-        };
-
-        tree.save_to_file(path)
+    pub fn save(&self, path: &str) -> Result<(), String>
+    where
+        H: Serialize
+    {
+        let config = bincode::config::standard();
+        let bytes = bincode::serde::encode_to_vec(self, config)
+            .map_err(|e| e.to_string())?;
+        std::fs::write(path, bytes).map_err(|e| e.to_string())
     }
 
-    /// Static method to load a serialized model state from a file
-    pub fn load(path: &str) -> Result<Self, String> {
-        let tree = SerializableTree::<H>::load_from_file(path)?;
-
-        let root = HashMap::new();
-
-        {
-            let guard = root.guard();
-
-            for (key, node) in tree.root {
-                root.insert(key, node.to_node(), &guard);
-            }
-        }
-
-        Ok(LogicTree {
-            features: tree.features,
-            root,
-        })
+    pub fn load(path: &str) -> Result<Self, String>
+    where
+        H: DeserializeOwned
+    {
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let config = bincode::config::standard();
+        let (tree, _) = bincode::serde::decode_from_slice(&bytes, config)
+            .map_err(|e| e.to_string())?;
+        Ok(tree)
     }
 
     /// Validate the provided feature name -> value pairs are in correct order.
@@ -128,7 +115,7 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     pub fn train(&self, features: Vec<Feature>, update: &I) -> Result<(), String> {
         self.validate(&features)?;
 
-        self.root.get(&Self::root_value(), &self.root.guard())
+        self.root.get(&Self::root_value())
             .expect("should have root node!")
             .train(&features, update);
 
@@ -153,7 +140,7 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
         self.validate(&features)?;
 
 
-        let res = self.root.get(&Self::root_value(), &self.root.guard())
+        let res = self.root.get(&Self::root_value())
             .expect("should have root node!")
             .predict(&features);
 
@@ -169,7 +156,7 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     /// Perform pruning of the tree per the handlers should_prune logic.
     /// If this returns true, then the whole map has been pruned (empty)
     pub fn prune(&self) -> bool {
-        self.root.get(&Self::root_value(), &self.root.guard())
+        self.root.get(&Self::root_value())
             .expect("should have root node!")
             .should_prune()
     }
@@ -177,7 +164,7 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     /// Return the count of nodes in this map. Optionally return
     /// the count of only leaf nodes.
     pub fn size(&self, leaf_only: bool) -> u32 {
-        self.root.get(&Self::root_value(), &self.root.guard())
+        self.root.get(&Self::root_value())
             .expect("should have root node!")
             .size(leaf_only)
     }

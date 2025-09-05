@@ -2,7 +2,6 @@ mod logictree;
 mod feature;
 mod node;
 mod handler;
-mod serialization;
 
 pub use logictree::*;
 pub use feature::*;
