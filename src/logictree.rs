@@ -1,11 +1,11 @@
-use std::string::ToString;
-use std::sync::Arc;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
-use serde::de::DeserializeOwned;
 use crate::feature::Value;
 use crate::node::Node;
 use crate::{Feature, PredictionHandler};
+use dashmap::DashMap;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::string::ToString;
+use std::sync::Arc;
 
 /// A high-performance decision tree that accumulates outcomes at each node and
 /// enables the user to define complex prediction logic, while supporting online learning.
@@ -19,14 +19,16 @@ use crate::{Feature, PredictionHandler};
     deserialize = "H: DeserializeOwned, Node<I, O, H>: for<'a> Deserialize<'a>"
 ))]
 pub struct LogicTree<I, O, H>
-where H: PredictionHandler<I, O>
+where
+    H: PredictionHandler<I, O>,
 {
     features: Vec<String>,
     root: DashMap<Value, Node<I, O, H>>,
 }
 
-impl <I, O, H> LogicTree<I, O, H>
-where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
+impl<I, O, H> LogicTree<I, O, H>
+where
+    H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize,
 {
     fn root_value() -> Value {
         Value::String("root".to_string())
@@ -39,29 +41,34 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     pub fn new(features: Vec<String>, handler: H) -> LogicTree<I, O, H> {
         let map = DashMap::new();
 
-        map.insert(Self::root_value(), Node::new(Arc::new(handler.new_instance())));
+        map.insert(
+            Self::root_value(),
+            Node::new(Arc::new(handler.new_instance())),
+        );
 
-        LogicTree { features, root: map }
+        LogicTree {
+            features,
+            root: map,
+        }
     }
 
     pub fn save(&self, path: &str) -> Result<(), String>
     where
-        H: Serialize
+        H: Serialize,
     {
         let config = bincode::config::standard();
-        let bytes = bincode::serde::encode_to_vec(self, config)
-            .map_err(|e| e.to_string())?;
+        let bytes = bincode::serde::encode_to_vec(self, config).map_err(|e| e.to_string())?;
         std::fs::write(path, bytes).map_err(|e| e.to_string())
     }
 
     pub fn load(path: &str) -> Result<Self, String>
     where
-        H: DeserializeOwned
+        H: DeserializeOwned,
     {
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         let config = bincode::config::standard();
-        let (tree, _) = bincode::serde::decode_from_slice(&bytes, config)
-            .map_err(|e| e.to_string())?;
+        let (tree, _) =
+            bincode::serde::decode_from_slice(&bytes, config).map_err(|e| e.to_string())?;
         Ok(tree)
     }
 
@@ -70,13 +77,19 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     /// since we can still make partial tree predictions
     fn validate(&self, features: &[Feature]) -> Result<(), String> {
         if features.len() > self.features.len() {
-            return Err(format!("Tree only has {} features but received input of {}",
-                       self.features.len(), features.len()));
+            return Err(format!(
+                "Tree only has {} features but received input of {}",
+                self.features.len(),
+                features.len()
+            ));
         }
 
         for (i, feat) in features.iter().enumerate() {
             if !feat.key.eq(&self.features[i]) {
-                return Err(format!("Found feat key `{}` but expected `{}`", feat.key, self.features[i]));
+                return Err(format!(
+                    "Found feat key `{}` but expected `{}`",
+                    feat.key, self.features[i]
+                ));
             }
         }
 
@@ -85,14 +98,17 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
 
     /// Extract the feature order stack from a map input.
     /// Validates contiguous ordered values are provided.
-    fn extract(&self, map: &std::collections::HashMap<&str, Feature>) -> Result<Vec<Feature>, String> {
+    fn extract(
+        &self,
+        map: &std::collections::HashMap<&str, Feature>,
+    ) -> Result<Vec<Feature>, String> {
         let mut features = Vec::with_capacity(map.len());
 
         for (_, key) in self.features.iter().enumerate() {
             let map_en = map.get(key.as_str());
 
             if map_en.is_none() {
-                break // hit end of contiguous matches
+                break; // hit end of contiguous matches
             }
 
             features.push(map_en.unwrap().clone());
@@ -102,8 +118,10 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
         // if latter values are supplied e.g. [a,b, <missing>, d] is not okay because we
         // would improperly only make a prediction based on [a,b] if following valid vals
         if features.len() < map.len() {
-            Err(format!("Break in contiguous values at missing feature `{}`",
-                        features.get(features.len()).unwrap()))?
+            Err(format!(
+                "Break in contiguous values at missing feature `{}`",
+                features.get(features.len()).unwrap()
+            ))?
         }
 
         Ok(features)
@@ -115,14 +133,19 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     pub fn train(&self, features: Vec<Feature>, update: &I) -> Result<(), String> {
         self.validate(&features)?;
 
-        self.root.get(&Self::root_value())
+        self.root
+            .get(&Self::root_value())
             .expect("should have root node!")
             .train(&features, update);
 
         Ok(())
     }
 
-    pub fn train_map(&self, data: std::collections::HashMap<&str, Feature>, update: &I) -> Result<(), String> {
+    pub fn train_map(
+        &self,
+        data: std::collections::HashMap<&str, Feature>,
+        update: &I,
+    ) -> Result<(), String> {
         self.train(self.extract(&data)?, update)
     }
 
@@ -139,8 +162,9 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     pub fn predict(&self, features: Vec<Feature>) -> Result<Option<O>, String> {
         self.validate(&features)?;
 
-
-        let res = self.root.get(&Self::root_value())
+        let res = self
+            .root
+            .get(&Self::root_value())
             .expect("should have root node!")
             .predict(&features);
 
@@ -149,14 +173,18 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
 
     /// Convenience method to predict based on map input of key -> feature values, and the
     /// tree handles organizing feature order. See `predict` in which the same validation rules apply.
-    pub fn predict_map(&self, data: std::collections::HashMap<&str, Feature>) -> Result<Option<O>, String> {
+    pub fn predict_map(
+        &self,
+        data: std::collections::HashMap<&str, Feature>,
+    ) -> Result<Option<O>, String> {
         self.predict(self.extract(&data)?)
     }
 
     /// Perform pruning of the tree per the handlers should_prune logic.
     /// If this returns true, then the whole map has been pruned (empty)
     pub fn prune(&self) -> bool {
-        self.root.get(&Self::root_value())
+        self.root
+            .get(&Self::root_value())
             .expect("should have root node!")
             .should_prune()
     }
@@ -164,9 +192,9 @@ where H: PredictionHandler<I, O> + for<'de> Deserialize<'de> + Serialize + Clone
     /// Return the count of nodes in this map. Optionally return
     /// the count of only leaf nodes.
     pub fn size(&self, leaf_only: bool) -> u32 {
-        self.root.get(&Self::root_value())
+        self.root
+            .get(&Self::root_value())
             .expect("should have root node!")
             .size(leaf_only)
     }
-
 }

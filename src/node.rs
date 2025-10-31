@@ -1,27 +1,32 @@
+use crate::handler::PredictionHandler;
+use crate::{Feature, Value};
+use dashmap::DashMap;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
-use serde::de::DeserializeOwned;
-use crate::{Feature, Value};
-use crate::handler::PredictionHandler;
 
 #[derive(Serialize, Deserialize)]
-#[serde(bound(
-    serialize = "H: Serialize",
-    deserialize = "H: DeserializeOwned"
-))]
+#[serde(bound(serialize = "H: Serialize", deserialize = "H: DeserializeOwned"))]
 pub(crate) struct Node<I, O, H>
-where H: PredictionHandler<I, O> {
+where
+    H: PredictionHandler<I, O>,
+{
     pub handler: Arc<H>,
     pub children: DashMap<Value, Node<I, O, H>>,
     _phantom: PhantomData<(I, O)>,
 }
 
 impl<I, O, H> Node<I, O, H>
-where H: PredictionHandler<I, O> {
+where
+    H: PredictionHandler<I, O>,
+{
     pub fn new(handler: Arc<H>) -> Node<I, O, H> {
-        Node { handler, children: DashMap::with_capacity(0), _phantom: PhantomData }
+        Node {
+            handler,
+            children: DashMap::with_capacity(0),
+            _phantom: PhantomData,
+        }
     }
 
     pub fn train(&self, stack: &[Feature], input: &I) -> () {
@@ -33,21 +38,22 @@ where H: PredictionHandler<I, O> {
 
         let feat = &stack[0];
 
-        self.children.entry(feat.value.clone())
-            .or_insert_with(|| { Node::new(Arc::new(self.handler.new_instance())) })
+        self.children
+            .entry(feat.value.clone())
+            .or_insert_with(|| Node::new(Arc::new(self.handler.new_instance())))
             .train(&stack[1..], input);
     }
 
     pub fn predict(&self, stack: &[Feature]) -> Option<O> {
         if stack.is_empty() {
-            return self.handler.predict()
+            return self.handler.predict();
         }
 
         let feat = &stack[0];
 
         if let Some(child) = self.children.get(&feat.value) {
             if let Some(prediction) = child.predict(&stack[1..]) {
-                return Some(prediction)
+                return Some(prediction);
             }
         }
 
@@ -65,13 +71,11 @@ where H: PredictionHandler<I, O> {
 
         // we are an active leaf node
         if self.children.is_empty() {
-            return false
+            return false;
         }
 
         // remove any individual nodes we should prune
-        self.children.retain(|_, node| {
-            !node.should_prune()
-        });
+        self.children.retain(|_, node| !node.should_prune());
 
         false
     }
@@ -83,12 +87,9 @@ where H: PredictionHandler<I, O> {
             return 1;
         }
 
-        let child_sz: u32 = self.children.iter()
-            .map(|node| node.size(leaf_only))
-            .sum();
+        let child_sz: u32 = self.children.iter().map(|node| node.size(leaf_only)).sum();
 
         // return child size plus self if not leaf only
         child_sz + if !leaf_only { 1 } else { 0 }
     }
-
 }

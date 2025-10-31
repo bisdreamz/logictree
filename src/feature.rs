@@ -1,5 +1,5 @@
-use std::fmt;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Define an input feature value and its type
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize, Deserialize)]
@@ -40,27 +40,44 @@ impl<'a> fmt::Display for Feature {
 
 impl Feature {
     pub fn string(key: &str, value: &'static str) -> Feature {
-        Feature { key: key.to_string(), value: Value::String(value.to_string()) }
+        Feature {
+            key: key.to_string(),
+            value: Value::String(value.to_string()),
+        }
     }
 
     pub fn boolean(key: &str, value: bool) -> Feature {
-        Feature {  key: key.to_string(), value: Value::Boolean(value) }
+        Feature {
+            key: key.to_string(),
+            value: Value::Boolean(value),
+        }
     }
 
     pub fn i32(key: &str, value: i32) -> Feature {
-        Feature { key: key.to_string(), value: Value::I32(value) }
+        Feature {
+            key: key.to_string(),
+            value: Value::I32(value),
+        }
     }
 
     pub fn i64(key: &str, value: i64) -> Feature {
-        Feature {  key: key.to_string(), value: Value::I64(value) }
+        Feature {
+            key: key.to_string(),
+            value: Value::I64(value),
+        }
     }
 
     pub fn u32(key: &str, value: u32) -> Feature {
-        Feature {  key: key.to_string(), value: Value::U32(value) }
+        Feature {
+            key: key.to_string(),
+            value: Value::U32(value),
+        }
     }
 
     pub fn u64(key: &str, value: u64) -> Feature {
-        Feature {  key: key.to_string(), value: Value::U64(value) }
+        Feature {
+            key: key.to_string(),
+            value: Value::U64(value),
+        }
     }
-
 }

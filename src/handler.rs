@@ -4,7 +4,6 @@
 /// (such as eviction due to inactivity) then it is suggested
 /// that Drop be implemented for resource cleanup
 pub trait PredictionHandler<I, O>: Send + Sync {
-
     /// Online update this prediction handler with a new training event,
     /// e.g. record new visit(s), sales, whatever
     fn train(&self, input: &I) -> ();
@@ -25,6 +24,7 @@ pub trait PredictionHandler<I, O>: Send + Sync {
     /// Return a *new* empty instance of this prediction handler,
     /// invoked as new tree values are encountered and thus
     /// new nodes created
-    fn new_instance(&self) -> Self where Self: Sized;
-
+    fn new_instance(&self) -> Self
+    where
+        Self: Sized;
 }
