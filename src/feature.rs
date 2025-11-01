@@ -39,7 +39,7 @@ impl<'a> fmt::Display for Feature {
 }
 
 impl Feature {
-    pub fn string(key: &str, value: &'static str) -> Feature {
+    pub fn string(key: &str, value: &str) -> Feature {
         Feature {
             key: key.to_string(),
             value: Value::String(value.to_string()),
