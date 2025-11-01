@@ -44,6 +44,10 @@ impl PredictionHandler<u64, u64> for SimpleHandler {
     fn predict(&self) -> Option<u64> { Some(*self.total.lock().unwrap()) }
     fn should_prune(&self) -> bool { false }
     fn new_instance(&self) -> Self { SimpleHandler::new() }
+    fn fold(&self, predictions: Vec<u64>) -> Option<u64> {
+        // Not using multi-value features in this example
+        unreachable!("fold not used in simple example")
+    }
 }
 ```
 
@@ -116,6 +120,11 @@ impl PredictionHandler<AdEvent, AdPrediction> for AdHandler {
     }
 
     fn new_instance(&self) -> Self { AdHandler::new() }
+
+    fn fold(&self, predictions: Vec<AdPrediction>) -> Option<AdPrediction> {
+        // Not using multi-value features in this example
+        unreachable!("fold not used in this example")
+    }
 }
 ```
 
@@ -170,11 +179,198 @@ let _ = tree.predict_map(m)?;
 let country_only = tree.predict(vec![ Feature::string("country", "US") ])?; // uses country-level aggregation
 ```
 
+## Multi-Value Features: Solving the Attribution Problem
+
+### The Problem
+
+In real-world traffic shaping and ad bidding systems, requests often contain **multi-valued features**. For example:
+- An OpenRTB bid request might support both **banner and video** formats
+- A CTV request might contain **10 identical video impression opportunities**
+- A content page might belong to multiple categories (**sports and news**)
+
+When manually handling this by making separate `train()` calls (one for "USA,Android,banner" and another for "USA,Android,video"), the parent nodes incorrectly **double-count** the auction:
+
+```rust
+// ❌ WRONG: Double-counts parent metrics
+tree.train(vec![
+    Feature::string("country", "USA"),
+    Feature::string("device", "Android"),
+    Feature::string("format", "banner"),
+], &event)?;
+
+tree.train(vec![
+    Feature::string("country", "USA"),
+    Feature::string("device", "Android"),
+    Feature::string("format", "video"),
+], &event)?;  // Same event trained twice!
+
+// Result: USA->Android node sees 2 auctions when there was only 1
+```
+
+This breaks the tree's mathematical integrity:
+- **Undercounting**: Recording only one format misses valuable signal
+- **Overcounting**: Recording all formats separately inflates parent metrics
+- **No accurate fallback**: Parent predictions become unreliable for traffic shaping
+
+### The Solution: Native Multi-Value Support
+
+LogicTree now supports **multi-value features** that properly attribute metrics across feature combinations:
+
+```rust
+// ✅ CORRECT: Single train call with multi-value feature
+tree.train(vec![
+    Feature::string("country", "USA"),
+    Feature::string("device", "Android"),
+    Feature::multi_string("format", vec!["banner", "video"]),  // Multi-value!
+], &event)?;
+
+// Result:
+// - USA node sees 1 auction (correct!)
+// - USA->Android node sees 1 auction (correct!)
+// - USA->Android->banner sees 1 auction
+// - USA->Android->video sees 1 auction
+```
+
+### How It Works
+
+When training with multi-value features:
+1. **Parent nodes are visited once** (USA, then Android)
+2. **Each parent receives the full training input** (1 auction count)
+3. **Child branches are created for each value** (banner AND video)
+4. **Each child receives the same full input** (banner: 1 auction, video: 1 auction)
+
+This maintains **mathematical correctness**: parent nodes aggregate properly while child nodes accumulate format-specific signal.
+
+### Prediction with Multi-Value Features
+
+When predicting with multi-value features, **peer predictions are aggregated** using your `fold()` implementation:
+
+```rust
+impl PredictionHandler<AdEvent, AdPrediction> for AdHandler {
+    // ... train, predict, etc.
+
+    /// Aggregate predictions from peer nodes (e.g., banner + video)
+    fn fold(&self, predictions: Vec<AdPrediction>) -> Option<AdPrediction> {
+        if predictions.is_empty() { return None; }
+
+        // Average CPM across formats
+        let avg_cpm = predictions.iter()
+            .map(|p| p.avg_cpm)
+            .sum::<f32>() / predictions.len() as f32;
+
+        // Average fill rate
+        let avg_fill = predictions.iter()
+            .map(|p| p.fill_rate)
+            .sum::<f32>() / predictions.len() as f32;
+
+        Some(AdPrediction { avg_cpm, fill_rate: avg_fill })
+    }
+}
+
+// Predict with multi-value format
+let prediction = tree.predict(vec![
+    Feature::string("country", "USA"),
+    Feature::string("device", "Android"),
+    Feature::multi_string("format", vec!["banner", "video"]),
+])?;
+// Returns: Average of banner and video predictions via fold()
+```
+
+**Note**: `fold()` is **only called when 2+ predictions exist**. Single predictions are returned directly without aggregation.
+
+### Real-World Example: Traffic Shaping
+
+```rust
+use logictree::{LogicTree, Feature, PredictionHandler};
+
+#[derive(Serialize, Deserialize)]
+struct TrafficHandler {
+    auctions: Mutex<u64>,
+    revenue: Mutex<f64>,
+}
+
+impl PredictionHandler<BidEvent, f64> for TrafficHandler {
+    fn train(&self, event: &BidEvent) {
+        *self.auctions.lock().unwrap() += 1;
+        *self.revenue.lock().unwrap() += event.cpm;
+    }
+
+    fn predict(&self) -> Option<f64> {
+        let auctions = *self.auctions.lock().unwrap();
+        let revenue = *self.revenue.lock().unwrap();
+        if auctions < 100 { return None; }  // Need enough data
+        Some(revenue / auctions as f64)  // Predict average CPM
+    }
+
+    fn fold(&self, predictions: Vec<f64>) -> Option<f64> {
+        // Average CPM across formats for blended prediction
+        Some(predictions.iter().sum::<f64>() / predictions.len() as f64)
+    }
+
+    fn should_prune(&self) -> bool { false }
+    fn new_instance(&self) -> Self { TrafficHandler::new() }
+}
+
+// Create tree for traffic shaping
+let tree = LogicTree::new(
+    vec!["country".into(), "device".into(), "format".into()],
+    TrafficHandler::new()
+);
+
+// Train with OpenRTB bid request supporting multiple formats
+tree.train(vec![
+    Feature::string("country", "USA"),
+    Feature::string("device", "mobile"),
+    Feature::multi_string("format", vec!["banner", "video"]),  // Multi-format support
+], &BidEvent { cpm: 2.50 })?;
+
+// Later: Make bidding decision
+let predicted_cpm = tree.predict(vec![
+    Feature::string("country", "USA"),
+    Feature::string("device", "mobile"),
+    Feature::multi_string("format", vec!["banner", "video"]),
+])?;
+
+// Result: Accurate blended CPM prediction for traffic shaping decisions
+// Parent nodes (USA, USA->mobile) have correct auction counts for fallback predictions
+```
+
+### Key Benefits
+
+✅ **Accurate parent metrics** - No double-counting in parent nodes
+✅ **Rich child signal** - Each format accumulates its own statistics
+✅ **Reliable fallbacks** - Parent predictions based on correct aggregations
+✅ **Flexible aggregation** - Custom `fold()` logic for your domain
+✅ **Automatic deduplication** - `multi_string(vec!["banner", "banner", "video"])` → `["banner", "video"]`
+✅ **Performance optimized** - Single-value features use SmallVec (zero allocation)
+
+### Constructor Reference
+
+```rust
+// Single-value constructors (zero heap allocation via SmallVec)
+Feature::string("country", "USA")
+Feature::i32("age", 25)
+Feature::boolean("premium", true)
+
+// Multi-value constructors (automatic deduplication)
+Feature::multi_string("format", vec!["banner", "video"])
+Feature::multi_i32("categories", vec![1, 2, 3])
+Feature::multi_boolean("flags", vec![true, false])
+```
+
+### Constraints
+
+- **Empty values are invalid**: `Feature::multi_string("format", vec![])` will return an error during `train()`/`predict()`
+- **fold() must be implemented**: The default implementation panics with a descriptive error if you use multi-value features without implementing `fold()`
+- **Values are deduplicated**: Duplicates are automatically removed using HashSet
+- **Guaranteed aggregation**: `fold()` is only called when 2+ peer predictions exist
+
 ## Performance Notes
 
 - Most predictions complete in microseconds; ~1M predictions/second is attainable on modern CPUs in typical scenarios.
 - Real-world throughput depends on handler complexity, tree depth and branching, and concurrent load.
 - `prune()` and `size()` traverse parts of the tree and can be expensive on very large trees; schedule accordingly.
+- **Multi-value optimization**: Single-value features use SmallVec for zero-allocation storage; multi-value features deduplicate via HashSet
 
 ## License
 

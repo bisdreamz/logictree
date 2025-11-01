@@ -91,6 +91,10 @@ where
                     feat.key, self.features[i]
                 ));
             }
+
+            if feat.values.is_empty() {
+                return Err(format!("Feature '{}' cannot have empty values", feat.key));
+            }
         }
 
         Ok(())
@@ -104,7 +108,7 @@ where
     ) -> Result<Vec<Feature>, String> {
         let mut features = Vec::with_capacity(map.len());
 
-        for (_, key) in self.features.iter().enumerate() {
+        for key in self.features.iter() {
             let map_en = map.get(key.as_str());
 
             if map_en.is_none() {
@@ -120,16 +124,55 @@ where
         if features.len() < map.len() {
             Err(format!(
                 "Break in contiguous values at missing feature `{}`",
-                features.get(features.len()).unwrap()
+                self.features.get(features.len()).unwrap()
             ))?
         }
 
         Ok(features)
     }
 
-    /// Updates the tree, and all associated feature nodes
-    /// with the associated update data, which will be
-    /// passed to each node's prediction handler
+    /// Updates the tree and all associated feature nodes with training data.
+    ///
+    /// For multi-value features, the same training input is applied to all corresponding
+    /// child nodes. For example, training with `format=[banner, video]` creates/updates
+    /// both the banner and video subtrees with the same input, while parent nodes
+    /// (country, device) are visited only once, preventing double-counting.
+    ///
+    /// # Arguments
+    /// * `features` - Feature vector in the same order as specified in constructor
+    /// * `update` - Training data passed to each node's PredictionHandler
+    ///
+    /// # Errors
+    /// Returns error if:
+    /// - Features are not in the correct order
+    /// - Feature keys don't match tree structure
+    /// - Any feature has empty values
+    ///
+    /// # Example
+    /// ```
+    /// # use logictree::{LogicTree, Feature, PredictionHandler};
+    /// # use std::sync::Mutex;
+    /// # use serde::{Serialize, Deserialize};
+    /// # #[derive(Serialize, Deserialize)] struct H { c: Mutex<u32> }
+    /// # impl Clone for H { fn clone(&self) -> Self { H { c: Mutex::new(*self.c.lock().unwrap()) } } }
+    /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
+    /// # impl PredictionHandler<u32, u32> for H {
+    /// #     fn train(&self, input: &u32) { *self.c.lock().unwrap() += input; }
+    /// #     fn predict(&self) -> Option<u32> { Some(*self.c.lock().unwrap()) }
+    /// #     fn should_prune(&self) -> bool { false }
+    /// #     fn new_instance(&self) -> Self { H::new() }
+    /// #     fn fold(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum::<u32>() / p.len() as u32) }
+    /// # }
+    /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
+    /// // Train with multi-value feature
+    /// tree.train(vec![
+    ///     Feature::string("country", "USA"),
+    ///     Feature::multi_string("format", vec!["banner", "video"]),
+    /// ], &10).unwrap();
+    ///
+    /// // Result: USA node sees 10, banner node sees 10, video node sees 10
+    /// // (Not 20 for USA!)
+    /// ```
     pub fn train(&self, features: Vec<Feature>, update: &I) -> Result<(), String> {
         self.validate(&features)?;
 
@@ -149,16 +192,47 @@ where
         self.train(self.extract(&data)?, update)
     }
 
-    /// Make a prediction for the associated feature vector,
-    /// which must be in the same order as the constructor.
-    /// Will attempt to make a prediction at the deepest node
-    /// first, and walk up the tree (parent feature nodes)
-    /// returning the first non empty node result. This
-    /// minimum prediction logic is handler impl specific.
-    /// Contiguous values are required, but the full
-    /// feature chain is not strictly required. E.g. for a
-    /// tree of [a,b,c] a prediction pf [a,b] is acceptable
-    /// however [a,c] is not.
+    /// Make a prediction for the associated feature vector.
+    ///
+    /// Attempts to make a prediction at the deepest matching node first, walking up the tree
+    /// to parent nodes and returning the first non-None result. For multi-value features,
+    /// predictions from all matching child nodes are aggregated using the PredictionHandler's
+    /// `fold()` method. If `fold()` returns None, falls back to the parent node's prediction.
+    ///
+    /// # Arguments
+    /// * `features` - Feature vector in the same order as specified in constructor
+    ///
+    /// # Constraints
+    /// - Features must be in the correct order
+    /// - Contiguous values required (e.g., `[a,b]` valid, `[a,c]` invalid for tree `[a,b,c]`)
+    /// - Full feature chain not required (partial paths acceptable)
+    ///
+    /// # Example
+    /// ```
+    /// # use logictree::{LogicTree, Feature, PredictionHandler};
+    /// # use std::sync::Mutex;
+    /// # use serde::{Serialize, Deserialize};
+    /// # #[derive(Serialize, Deserialize)] struct H { c: Mutex<u32> }
+    /// # impl Clone for H { fn clone(&self) -> Self { H { c: Mutex::new(*self.c.lock().unwrap()) } } }
+    /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
+    /// # impl PredictionHandler<u32, u32> for H {
+    /// #     fn train(&self, input: &u32) { *self.c.lock().unwrap() += input; }
+    /// #     fn predict(&self) -> Option<u32> { Some(*self.c.lock().unwrap()) }
+    /// #     fn should_prune(&self) -> bool { false }
+    /// #     fn new_instance(&self) -> Self { H::new() }
+    /// #     fn fold(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum::<u32>() / p.len() as u32) }
+    /// # }
+    /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
+    /// # tree.train(vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &100).unwrap();
+    /// # tree.train(vec![Feature::string("country", "USA"), Feature::string("format", "video")], &200).unwrap();
+    /// // Predict with multi-value feature (aggregates banner + video via fold)
+    /// let result = tree.predict(vec![
+    ///     Feature::string("country", "USA"),
+    ///     Feature::multi_string("format", vec!["banner", "video"]),
+    /// ]).unwrap();
+    ///
+    /// // Returns: Average of banner (100) and video (200) = 150
+    /// ```
     pub fn predict(&self, features: Vec<Feature>) -> Result<Option<O>, String> {
         self.validate(&features)?;
 

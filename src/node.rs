@@ -29,7 +29,7 @@ where
         }
     }
 
-    pub fn train(&self, stack: &[Feature], input: &I) -> () {
+    pub fn train(&self, stack: &[Feature], input: &I) {
         self.handler.train(input);
 
         if stack.is_empty() {
@@ -38,10 +38,12 @@ where
 
         let feat = &stack[0];
 
-        self.children
-            .entry(feat.value.clone())
-            .or_insert_with(|| Node::new(Arc::new(self.handler.new_instance())))
-            .train(&stack[1..], input);
+        for value in &feat.values {
+            self.children
+                .entry(value.clone())
+                .or_insert_with(|| Node::new(Arc::new(self.handler.new_instance())))
+                .train(&stack[1..], input);
+        }
     }
 
     pub fn predict(&self, stack: &[Feature]) -> Option<O> {
@@ -51,13 +53,25 @@ where
 
         let feat = &stack[0];
 
-        if let Some(child) = self.children.get(&feat.value) {
-            if let Some(prediction) = child.predict(&stack[1..]) {
-                return Some(prediction);
-            }
+        let mut predictions = Vec::new();
+        for value in &feat.values {
+            if let Some(child) = self.children.get(value)
+                && let Some(prediction) = child.predict(&stack[1..]) {
+                    predictions.push(prediction);
+                }
         }
 
-        self.handler.predict()
+        match predictions.len() {
+            0 => self.handler.predict(),
+            1 => predictions.into_iter().next(),
+            _ => {
+                if let Some(folded) = self.handler.fold(predictions) {
+                    Some(folded)
+                } else {
+                    self.handler.predict()
+                }
+            }
+        }
     }
 
     pub(crate) fn should_prune(&self) -> bool {
