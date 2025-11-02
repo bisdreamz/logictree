@@ -165,7 +165,7 @@ where
     /// # }
     /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
     /// // Train with multi-value feature
-    /// tree.train(vec![
+    /// tree.train(&vec![
     ///     Feature::string("country", "USA"),
     ///     Feature::multi_string("format", vec!["banner", "video"]),
     /// ], &10).unwrap();
@@ -173,13 +173,13 @@ where
     /// // Result: USA node sees 10, banner node sees 10, video node sees 10
     /// // (Not 20 for USA!)
     /// ```
-    pub fn train(&self, features: Vec<Feature>, update: &I) -> Result<(), String> {
+    pub fn train(&self, features: &Vec<Feature>, update: &I) -> Result<(), String> {
         self.validate(&features)?;
 
         self.root
             .get(&Self::root_value())
             .expect("should have root node!")
-            .train(&features, update);
+            .train(features, update);
 
         Ok(())
     }
@@ -189,7 +189,7 @@ where
         data: std::collections::HashMap<&str, Feature>,
         update: &I,
     ) -> Result<(), String> {
-        self.train(self.extract(&data)?, update)
+        self.train(&self.extract(&data)?, update)
     }
 
     /// Make a prediction for the associated feature vector.
@@ -223,24 +223,24 @@ where
     /// #     fn resolve(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum()) }
     /// # }
     /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
-    /// # tree.train(vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &100).unwrap();
-    /// # tree.train(vec![Feature::string("country", "USA"), Feature::string("format", "video")], &200).unwrap();
+    /// # tree.train(&vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &100).unwrap();
+    /// # tree.train(&vec![Feature::string("country", "USA"), Feature::string("format", "video")], &200).unwrap();
     /// // Predict with multi-value feature (aggregates banner + video via resolve)
-    /// let result = tree.predict(vec![
+    /// let result = tree.predict(&vec![
     ///     Feature::string("country", "USA"),
     ///     Feature::multi_string("format", vec!["banner", "video"]),
     /// ]).unwrap();
     ///
     /// // Returns: Sum of banner (100) and video (200) = 300
     /// ```
-    pub fn predict(&self, features: Vec<Feature>) -> Result<Option<O>, String> {
+    pub fn predict(&self, features: &Vec<Feature>) -> Result<Option<O>, String> {
         self.validate(&features)?;
 
         let res = self
             .root
             .get(&Self::root_value())
             .expect("should have root node!")
-            .predict(&features);
+            .predict(features);
 
         Ok(res)
     }
@@ -251,7 +251,7 @@ where
         &self,
         data: std::collections::HashMap<&str, Feature>,
     ) -> Result<Option<O>, String> {
-        self.predict(self.extract(&data)?)
+        self.predict(&self.extract(&data)?)
     }
 
     /// Perform pruning of the tree per the handlers should_prune logic.

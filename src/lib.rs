@@ -64,7 +64,7 @@
 //! );
 //!
 //! // 3. Train with multi-value feature
-//! tree.train(vec![
+//! tree.train(&vec![
 //!     Feature::string("country", "USA"),
 //!     Feature::multi_string("format", vec!["banner", "video"]),
 //! ], &10).unwrap();
@@ -73,7 +73,7 @@
 //! // Child nodes (banner, video) each see 1 auction
 //!
 //! // 4. Predict with multi-value feature (aggregates via resolve)
-//! let result = tree.predict(vec![
+//! let result = tree.predict(&vec![
 //!     Feature::string("country", "USA"),
 //!     Feature::multi_string("format", vec!["banner", "video"]),
 //! ]).unwrap();
@@ -153,14 +153,14 @@ mod tests {
     }
 
     fn test_map_assertions(tree: &LogicTree<u32, u32, TestHandler>) {
-        let res = tree.predict(vec![Feature::string("one", "foo")]);
+        let res = tree.predict(&vec![Feature::string("one", "foo")]);
         assert_eq!(
             res,
             Ok(Some(20)),
             "Foo parent prediction should equal sum of parent and children"
         );
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("one", "foo"),
             Feature::string("two", "bar"),
         ]);
@@ -170,7 +170,7 @@ mod tests {
             "Foo.bar prediction should equal node specific training value"
         );
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("one", "foo"),
             Feature::string("two", "dang"),
         ]);
@@ -181,7 +181,7 @@ mod tests {
         );
 
         // prediction features in wrong order
-        tree.predict(vec![
+        tree.predict(&vec![
             Feature::string("two", "bar"),
             Feature::string("one", "foo"),
         ])
@@ -208,19 +208,19 @@ mod tests {
         );
 
         tree.train(
-            vec![Feature::string("one", "foo"), Feature::string("two", "bar")],
+            &vec![Feature::string("one", "foo"), Feature::string("two", "bar")],
             &10,
         )
         .unwrap();
 
         tree.train(
-            vec![Feature::string("one", "foo"), Feature::string("two", "baz")],
+            &vec![Feature::string("one", "foo"), Feature::string("two", "baz")],
             &5,
         )
         .unwrap();
 
         tree.train(
-            vec![Feature::string("one", "foo"), Feature::string("two", "bum")],
+            &vec![Feature::string("one", "foo"), Feature::string("two", "bum")],
             &5,
         )
         .unwrap();
@@ -251,7 +251,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("device", "android"),
                 Feature::multi_string("format", vec!["banner", "video"]),
@@ -260,14 +260,14 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![Feature::string("country", "usa")]);
+        let res = tree.predict(&vec![Feature::string("country", "usa")]);
         assert_eq!(
             res,
             Ok(Some(10)),
             "USA node should see 10 (not 20 from double-counting)"
         );
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
         ]);
@@ -277,7 +277,7 @@ mod tests {
             "USA->android node should see 10 (not 20)"
         );
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
             Feature::multi_string("format", vec!["banner", "video"]),
@@ -344,7 +344,7 @@ mod tests {
 
         // Train banner format with value 100
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "banner"),
             ],
@@ -354,7 +354,7 @@ mod tests {
 
         // Train video format with value 200
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "video"),
             ],
@@ -362,7 +362,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -372,7 +372,7 @@ mod tests {
             "Should sum banner (100) and video (200) = 300"
         );
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
@@ -392,7 +392,7 @@ mod tests {
 
         // Mix single and multi-value features
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("device", vec!["android", "ios"]),
                 Feature::string("format", "banner"),
@@ -402,14 +402,14 @@ mod tests {
         .unwrap();
 
         // Check both android and ios branches exist
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
             Feature::string("format", "banner"),
         ]);
         assert_eq!(res, Ok(Some(5)), "Android->banner should exist");
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "ios"),
             Feature::string("format", "banner"),
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(res, Ok(Some(5)), "iOS->banner should exist");
 
         // Parent should not double-count
-        let res = tree.predict(vec![Feature::string("country", "usa")]);
+        let res = tree.predict(&vec![Feature::string("country", "usa")]);
         assert_eq!(res, Ok(Some(5)), "USA should see 5 (not 10)");
     }
 
@@ -436,7 +436,7 @@ mod tests {
         // Train 10 times to simulate 10 video impressions
         for _ in 0..10 {
             tree.train(
-                vec![
+                &vec![
                     Feature::string("country", "usa"),
                     Feature::string("device", "ctv"),
                     Feature::string("format", "video"),
@@ -446,14 +446,14 @@ mod tests {
             .unwrap();
         }
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "ctv"),
             Feature::string("format", "video"),
         ]);
         assert_eq!(res, Ok(Some(10)), "CTV video should have 10 impressions");
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "ctv"),
         ]);
@@ -468,7 +468,7 @@ mod tests {
         );
 
         let result = tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", Vec::<&str>::new()),
             ],
@@ -490,7 +490,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "banner", "video"]),
             ],
@@ -498,7 +498,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
@@ -513,7 +513,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -528,7 +528,7 @@ mod tests {
         let loaded: LogicTree<u32, u32, TestHandler> =
             LogicTree::load(file).expect("Should deserialize tree");
 
-        let res = loaded.predict(vec![
+        let res = loaded.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -549,7 +549,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "banner"),
             ],
@@ -558,7 +558,7 @@ mod tests {
         .unwrap();
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "video"),
             ],
@@ -566,7 +566,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -591,7 +591,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("device", "android"),
                 Feature::multi_string("format", vec!["banner", "video"]),
@@ -602,16 +602,16 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![Feature::string("country", "usa")]);
+        let res = tree.predict(&vec![Feature::string("country", "usa")]);
         assert_eq!(res, Ok(Some(10)), "USA should see 10 (not 20 or 40)");
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
         ]);
         assert_eq!(res, Ok(Some(10)), "USA->android should see 10");
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
             Feature::multi_string("format", vec!["banner", "video"]),
@@ -632,7 +632,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -640,7 +640,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -659,7 +659,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -668,7 +668,7 @@ mod tests {
         .unwrap();
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["video", "banner"]),
             ],
@@ -676,7 +676,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -695,7 +695,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "banner"),
             ],
@@ -704,7 +704,7 @@ mod tests {
         .unwrap();
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "video"),
             ],
@@ -713,7 +713,7 @@ mod tests {
         .unwrap();
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -721,7 +721,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -740,7 +740,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -749,7 +749,7 @@ mod tests {
         .unwrap();
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "native"]),
             ],
@@ -757,7 +757,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -776,7 +776,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "banner"),
             ],
@@ -784,7 +784,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
@@ -794,7 +794,7 @@ mod tests {
             "Single value should not create composite"
         );
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
@@ -817,7 +817,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
                 Feature::string("size", "300x250"),
@@ -826,7 +826,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
             Feature::string("size", "300x250"),
@@ -846,7 +846,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::string("format", "banner"),
             ],
@@ -855,7 +855,7 @@ mod tests {
         .unwrap();
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -863,7 +863,7 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
@@ -940,7 +940,7 @@ mod tests {
         );
 
         tree.train(
-            vec![
+            &vec![
                 Feature::string("country", "usa"),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -948,7 +948,7 @@ mod tests {
         )
         .unwrap();
 
-        let res_before = tree.predict(vec![
+        let res_before = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
@@ -970,7 +970,7 @@ mod tests {
 
         // Train with consecutive multi-value features
         tree.train(
-            vec![
+            &vec![
                 Feature::multi_string("country", vec!["USA", "Canada"]),
                 Feature::multi_string("format", vec!["banner", "video"]),
             ],
@@ -981,29 +981,33 @@ mod tests {
         // All these should return 100 (no double counting, no aggregation)
 
         // Single country matches the composite
-        let res = tree.predict(vec![Feature::string("country", "USA")]);
+        let res = tree.predict(&vec![Feature::string("country", "USA")]);
         assert_eq!(res, Ok(Some(100)), "Single country should return 100");
 
         // Single country + single format
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "USA"),
             Feature::string("format", "banner"),
         ]);
         assert_eq!(res, Ok(Some(100)), "USA + banner should return 100");
 
         // Single country + multi format
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::string("country", "USA"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
         assert_eq!(res, Ok(Some(100)), "USA + [banner,video] should return 100");
 
         // Multi country + multi format (exact training match)
-        let res = tree.predict(vec![
+        let res = tree.predict(&vec![
             Feature::multi_string("country", vec!["USA", "Canada"]),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(res, Ok(Some(100)), "[USA,Canada] + [banner,video] should return 100");
+        assert_eq!(
+            res,
+            Ok(Some(100)),
+            "[USA,Canada] + [banner,video] should return 100"
+        );
     }
 
     #[test]
@@ -1014,29 +1018,38 @@ mod tests {
         );
 
         // Test with Vec<String> - should work without cloning
-        let owned_formats: Vec<String> = vec!["banner".to_string(), "video".to_string(), "native".to_string()];
+        let owned_formats: Vec<String> = vec![
+            "banner".to_string(),
+            "video".to_string(),
+            "native".to_string(),
+        ];
         let owned_countries: Vec<String> = vec!["USA".to_string(), "Canada".to_string()];
 
         tree.train(
-            vec![
+            &vec![
                 Feature::multi_string("country", owned_countries),
                 Feature::multi_string("format", owned_formats),
             ],
             &42,
-        ).expect("Training should succeed with owned strings");
+        )
+        .expect("Training should succeed with owned strings");
 
         // Also test that mixing owned and borrowed works
         let mixed_formats = vec!["banner".to_string(), "video".to_string()];
-        let res = tree.predict(vec![
-            Feature::multi_string("country", vec!["USA", "Canada"]),  // borrowed
-            Feature::multi_string("format", mixed_formats),           // owned
+        let res = tree.predict(&vec![
+            Feature::multi_string("country", vec!["USA", "Canada"]), // borrowed
+            Feature::multi_string("format", mixed_formats),          // owned
         ]);
 
-        assert_eq!(res, Ok(Some(42)), "Should predict correctly with mixed owned/borrowed strings");
+        assert_eq!(
+            res,
+            Ok(Some(42)),
+            "Should predict correctly with mixed owned/borrowed strings"
+        );
 
         // Test with iterators too
         let iter_formats = vec!["banner", "native"].into_iter();
-        let _ = tree.predict(vec![
+        let _ = tree.predict(&vec![
             Feature::string("country", "USA"),
             Feature::multi_string("format", iter_formats),
         ]);
