@@ -163,6 +163,11 @@ impl Feature {
     /// Enables traversing multiple tree paths during training/prediction.
     /// The caller must ensure no duplicate values are provided.
     ///
+    /// Accepts various string types efficiently:
+    /// - `Vec<&str>` - clones as needed
+    /// - `Vec<String>` - moves ownership without cloning
+    /// - Arrays, slices, and any iterator of string-like types
+    ///
     /// # Panics
     /// Panics if any value contains null bytes (\x00), which are reserved for internal use.
     ///
@@ -170,20 +175,28 @@ impl Feature {
     /// ```
     /// use logictree::Feature;
     ///
-    /// // For OpenRTB bid request supporting multiple ad formats
+    /// // With string literals (clones as needed)
     /// let formats = Feature::multi_string("format", vec!["banner", "video"]);
+    ///
+    /// // With owned strings (zero clones - moves ownership)
+    /// let owned_formats = vec!["banner".to_string(), "video".to_string()];
+    /// let formats = Feature::multi_string("format", owned_formats);
     /// ```
-    pub fn multi_string(key: &str, values: Vec<&str>) -> Feature {
-        for value in &values {
-            if let Err(e) = Self::validate_string(value) {
-                panic!("{}", e);
-            }
-        }
+    pub fn multi_string<I, S>(key: &str, values: I) -> Feature
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String> + AsRef<str>,
+    {
         Feature {
             key: key.to_string(),
             values: values
                 .into_iter()
-                .map(|v| Value::String(v.to_string()))
+                .map(|v| {
+                    if let Err(e) = Self::validate_string(v.as_ref()) {
+                        panic!("{}", e);
+                    }
+                    Value::String(v.into())
+                })
                 .collect(),
         }
     }

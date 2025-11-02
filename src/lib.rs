@@ -470,7 +470,7 @@ mod tests {
         let result = tree.train(
             vec![
                 Feature::string("country", "usa"),
-                Feature::multi_string("format", vec![]),
+                Feature::multi_string("format", Vec::<&str>::new()),
             ],
             &10,
         );
@@ -1004,5 +1004,41 @@ mod tests {
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
         assert_eq!(res, Ok(Some(100)), "[USA,Canada] + [banner,video] should return 100");
+    }
+
+    #[test]
+    fn test_multi_string_with_owned_strings() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        // Test with Vec<String> - should work without cloning
+        let owned_formats: Vec<String> = vec!["banner".to_string(), "video".to_string(), "native".to_string()];
+        let owned_countries: Vec<String> = vec!["USA".to_string(), "Canada".to_string()];
+
+        tree.train(
+            vec![
+                Feature::multi_string("country", owned_countries),
+                Feature::multi_string("format", owned_formats),
+            ],
+            &42,
+        ).expect("Training should succeed with owned strings");
+
+        // Also test that mixing owned and borrowed works
+        let mixed_formats = vec!["banner".to_string(), "video".to_string()];
+        let res = tree.predict(vec![
+            Feature::multi_string("country", vec!["USA", "Canada"]),  // borrowed
+            Feature::multi_string("format", mixed_formats),           // owned
+        ]);
+
+        assert_eq!(res, Ok(Some(42)), "Should predict correctly with mixed owned/borrowed strings");
+
+        // Test with iterators too
+        let iter_formats = vec!["banner", "native"].into_iter();
+        let _ = tree.predict(vec![
+            Feature::string("country", "USA"),
+            Feature::multi_string("format", iter_formats),
+        ]);
     }
 }
