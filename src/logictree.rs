@@ -158,10 +158,10 @@ where
     /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
     /// # impl PredictionHandler<u32, u32> for H {
     /// #     fn train(&self, input: &u32) { *self.c.lock().unwrap() += input; }
-    /// #     fn predict(&self) -> Option<u32> { Some(*self.c.lock().unwrap()) }
+    /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
     /// #     fn new_instance(&self) -> Self { H::new() }
-    /// #     fn fold(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum::<u32>() / p.len() as u32) }
+    /// #     fn resolve(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum()) }
     /// # }
     /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
     /// // Train with multi-value feature
@@ -197,7 +197,7 @@ where
     /// Attempts to make a prediction at the deepest matching node first, walking up the tree
     /// to parent nodes and returning the first non-None result. For multi-value features,
     /// predictions from all matching child nodes are aggregated using the PredictionHandler's
-    /// `fold()` method. If `fold()` returns None, falls back to the parent node's prediction.
+    /// `resolve()` method. If `resolve()` returns None, falls back to the parent node's prediction.
     ///
     /// # Arguments
     /// * `features` - Feature vector in the same order as specified in constructor
@@ -217,21 +217,21 @@ where
     /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
     /// # impl PredictionHandler<u32, u32> for H {
     /// #     fn train(&self, input: &u32) { *self.c.lock().unwrap() += input; }
-    /// #     fn predict(&self) -> Option<u32> { Some(*self.c.lock().unwrap()) }
+    /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
     /// #     fn new_instance(&self) -> Self { H::new() }
-    /// #     fn fold(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum::<u32>() / p.len() as u32) }
+    /// #     fn resolve(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum()) }
     /// # }
     /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
     /// # tree.train(vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &100).unwrap();
     /// # tree.train(vec![Feature::string("country", "USA"), Feature::string("format", "video")], &200).unwrap();
-    /// // Predict with multi-value feature (aggregates banner + video via fold)
+    /// // Predict with multi-value feature (aggregates banner + video via resolve)
     /// let result = tree.predict(vec![
     ///     Feature::string("country", "USA"),
     ///     Feature::multi_string("format", vec!["banner", "video"]),
     /// ]).unwrap();
     ///
-    /// // Returns: Average of banner (100) and video (200) = 150
+    /// // Returns: Sum of banner (100) and video (200) = 300
     /// ```
     pub fn predict(&self, features: Vec<Feature>) -> Result<Option<O>, String> {
         self.validate(&features)?;

@@ -8,17 +8,12 @@
 //! - **Single-value**: Use `Feature::string()`, `Feature::i32()`, etc.
 //! - **Multi-value**: Use `Feature::multi_string()`, `Feature::multi_i32()`, etc.
 //!
-//! Multi-value features enable training/predicting across multiple tree paths
-//! simultaneously, crucial for scenarios like ad formats, content categories, etc.
-//!
-//! # Performance
-//!
-//! Single-value features use `SmallVec` for zero-allocation inline storage.
-//! Multi-value features automatically deduplicate values using `HashSet`.
+//! Multi-value features enable training/predicting for features which contain
+//! multiple values, while still producing the proper prediction results
+//! assuming that the handler's 'resolve()' method is implemented properly
 
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
-use std::collections::HashSet;
 use std::fmt;
 
 /// Define an input feature value and its type.
@@ -70,11 +65,6 @@ impl fmt::Display for Value {
 /// - **Single values**: Zero heap allocations (stored inline)
 /// - **Multiple values**: Heap allocation only when needed
 ///
-/// # Deduplication
-///
-/// Multi-value constructors automatically deduplicate values using `HashSet`.
-/// `Feature::multi_string("format", vec!["banner", "banner", "video"])` stores `["banner", "video"]`.
-///
 /// # Examples
 ///
 /// ```
@@ -113,7 +103,20 @@ impl fmt::Display for Feature {
 }
 
 impl Feature {
+    fn validate_string(value: &str) -> Result<(), String> {
+        if value.contains('\x00') {
+            return Err(format!(
+                "Feature value cannot contain null bytes (\\x00): '{}'",
+                value.escape_default()
+            ));
+        }
+        Ok(())
+    }
+
     pub fn string(key: &str, value: &str) -> Feature {
+        if let Err(e) = Self::validate_string(value) {
+            panic!("{}", e);
+        }
         Feature {
             key: key.to_string(),
             values: smallvec::smallvec![Value::String(value.to_string())],
@@ -155,10 +158,13 @@ impl Feature {
         }
     }
 
-    /// Creates a multi-value string feature with automatic deduplication.
+    /// Creates a multi-value string feature.
     ///
     /// Enables traversing multiple tree paths during training/prediction.
-    /// Duplicates are automatically removed.
+    /// The caller must ensure no duplicate values are provided.
+    ///
+    /// # Panics
+    /// Panics if any value contains null bytes (\x00), which are reserved for internal use.
     ///
     /// # Example
     /// ```
@@ -168,55 +174,67 @@ impl Feature {
     /// let formats = Feature::multi_string("format", vec!["banner", "video"]);
     /// ```
     pub fn multi_string(key: &str, values: Vec<&str>) -> Feature {
-        let unique: HashSet<_> = values.into_iter().collect();
+        for value in &values {
+            if let Err(e) = Self::validate_string(value) {
+                panic!("{}", e);
+            }
+        }
         Feature {
             key: key.to_string(),
-            values: unique.into_iter().map(|v| Value::String(v.to_string())).collect(),
+            values: values
+                .into_iter()
+                .map(|v| Value::String(v.to_string()))
+                .collect(),
         }
     }
 
-    /// Creates a multi-value boolean feature with automatic deduplication.
+    /// Creates a multi-value boolean feature.
+    ///
+    /// The caller must ensure no duplicate values are provided.
     pub fn multi_boolean(key: &str, values: Vec<bool>) -> Feature {
-        let unique: HashSet<_> = values.into_iter().collect();
         Feature {
             key: key.to_string(),
-            values: unique.into_iter().map(Value::Boolean).collect(),
+            values: values.into_iter().map(Value::Boolean).collect(),
         }
     }
 
-    /// Creates a multi-value i32 feature with automatic deduplication.
+    /// Creates a multi-value i32 feature.
+    ///
+    /// The caller must ensure no duplicate values are provided.
     pub fn multi_i32(key: &str, values: Vec<i32>) -> Feature {
-        let unique: HashSet<_> = values.into_iter().collect();
         Feature {
             key: key.to_string(),
-            values: unique.into_iter().map(Value::I32).collect(),
+            values: values.into_iter().map(Value::I32).collect(),
         }
     }
 
-    /// Creates a multi-value i64 feature with automatic deduplication.
+    /// Creates a multi-value i64 feature.
+    ///
+    /// The caller must ensure no duplicate values are provided.
     pub fn multi_i64(key: &str, values: Vec<i64>) -> Feature {
-        let unique: HashSet<_> = values.into_iter().collect();
         Feature {
             key: key.to_string(),
-            values: unique.into_iter().map(Value::I64).collect(),
+            values: values.into_iter().map(Value::I64).collect(),
         }
     }
 
-    /// Creates a multi-value u32 feature with automatic deduplication.
+    /// Creates a multi-value u32 feature.
+    ///
+    /// The caller must ensure no duplicate values are provided.
     pub fn multi_u32(key: &str, values: Vec<u32>) -> Feature {
-        let unique: HashSet<_> = values.into_iter().collect();
         Feature {
             key: key.to_string(),
-            values: unique.into_iter().map(Value::U32).collect(),
+            values: values.into_iter().map(Value::U32).collect(),
         }
     }
 
-    /// Creates a multi-value u64 feature with automatic deduplication.
+    /// Creates a multi-value u64 feature.
+    ///
+    /// The caller must ensure no duplicate values are provided.
     pub fn multi_u64(key: &str, values: Vec<u64>) -> Feature {
-        let unique: HashSet<_> = values.into_iter().collect();
         Feature {
             key: key.to_string(),
-            values: unique.into_iter().map(Value::U64).collect(),
+            values: values.into_iter().map(Value::U64).collect(),
         }
     }
 }

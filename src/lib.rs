@@ -44,13 +44,13 @@
 //!         *self.count.lock().unwrap() += input;
 //!     }
 //!
-//!     fn predict(&self) -> Option<u32> {
-//!         Some(*self.count.lock().unwrap())
+//!     fn predict(&self) -> u32 {
+//!         *self.count.lock().unwrap()
 //!     }
 //!
-//!     fn fold(&self, predictions: Vec<u32>) -> Option<u32> {
-//!         // Average predictions from peer nodes (for multi-value features)
-//!         Some(predictions.iter().sum::<u32>() / predictions.len() as u32)
+//!     fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
+//!         // Sum independent samples from peer nodes (for multi-value features)
+//!         Some(predictions.iter().sum())
 //!     }
 //!
 //!     fn should_prune(&self) -> bool { false }
@@ -72,7 +72,7 @@
 //! // Parent node (USA) sees 1 auction, not 2!
 //! // Child nodes (banner, video) each see 1 auction
 //!
-//! // 4. Predict with multi-value feature (aggregates via fold)
+//! // 4. Predict with multi-value feature (aggregates via resolve)
 //! let result = tree.predict(vec![
 //!     Feature::string("country", "USA"),
 //!     Feature::multi_string("format", vec!["banner", "video"]),
@@ -91,7 +91,7 @@
 //! - [`LogicTree`]: Main tree structure
 //! - [`PredictionHandler`]: Trait for custom prediction logic
 //! - [`Feature`]: Feature input types (single and multi-value)
-//! - [README Multi-Value Section](https://github.com/yourusername/logictree#multi-value-features-solving-the-attribution-problem)
+//! - See README for detailed multi-value feature examples
 
 mod feature;
 mod handler;
@@ -130,14 +130,13 @@ mod tests {
         }
     }
 
-    // TODO handler examples with complex i/o types
     impl PredictionHandler<u32, u32> for TestHandler {
         fn train(&self, input: &u32) -> () {
             *self.total.lock().unwrap() += *input as usize;
         }
 
-        fn predict(&self) -> Option<u32> {
-            Some(*self.total.lock().unwrap() as u32)
+        fn predict(&self) -> u32 {
+            *self.total.lock().unwrap() as u32
         }
 
         fn should_prune(&self) -> bool {
@@ -148,7 +147,7 @@ mod tests {
             TestHandler::new()
         }
 
-        fn fold(&self, predictions: Vec<u32>) -> Option<u32> {
+        fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
             predictions.into_iter().next()
         }
     }
@@ -243,11 +242,14 @@ mod tests {
     #[test]
     fn test_multi_value_features() {
         let tree = LogicTree::new(
-            vec!["country".to_string(), "device".to_string(), "format".to_string()],
+            vec![
+                "country".to_string(),
+                "device".to_string(),
+                "format".to_string(),
+            ],
             TestHandler::new(),
         );
 
-        // Train with multi-value format feature: [banner, video]
         tree.train(
             vec![
                 Feature::string("country", "usa"),
@@ -258,62 +260,63 @@ mod tests {
         )
         .unwrap();
 
-        // Verify parent nodes see correct counts (no double-counting)
-        let res = tree.predict(vec![
-            Feature::string("country", "usa"),
-        ]);
-        assert_eq!(res, Ok(Some(10)), "USA node should see 10 (not 20 from double-counting)");
+        let res = tree.predict(vec![Feature::string("country", "usa")]);
+        assert_eq!(
+            res,
+            Ok(Some(10)),
+            "USA node should see 10 (not 20 from double-counting)"
+        );
 
         let res = tree.predict(vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
         ]);
-        assert_eq!(res, Ok(Some(10)), "USA->android node should see 10 (not 20)");
-
-        // Verify both banner and video branches were created and trained
-        let res = tree.predict(vec![
-            Feature::string("country", "usa"),
-            Feature::string("device", "android"),
-            Feature::string("format", "banner"),
-        ]);
-        assert_eq!(res, Ok(Some(10)), "Banner branch should exist with value 10");
+        assert_eq!(
+            res,
+            Ok(Some(10)),
+            "USA->android node should see 10 (not 20)"
+        );
 
         let res = tree.predict(vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
-            Feature::string("format", "video"),
+            Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(res, Ok(Some(10)), "Video branch should exist with value 10");
+        assert_eq!(
+            res,
+            Ok(Some(10)),
+            "Composite banner|video should exist with value 10"
+        );
     }
 
     #[derive(Serialize, Deserialize)]
-    struct AveragingHandler {
+    struct SummingHandler {
         pub total: Mutex<usize>,
     }
 
-    impl Clone for AveragingHandler {
+    impl Clone for SummingHandler {
         fn clone(&self) -> Self {
-            AveragingHandler {
+            SummingHandler {
                 total: Mutex::new(*self.total.lock().unwrap()),
             }
         }
     }
 
-    impl AveragingHandler {
-        pub fn new() -> AveragingHandler {
-            AveragingHandler {
+    impl SummingHandler {
+        pub fn new() -> SummingHandler {
+            SummingHandler {
                 total: Mutex::new(0),
             }
         }
     }
 
-    impl PredictionHandler<u32, u32> for AveragingHandler {
+    impl PredictionHandler<u32, u32> for SummingHandler {
         fn train(&self, input: &u32) -> () {
             *self.total.lock().unwrap() += *input as usize;
         }
 
-        fn predict(&self) -> Option<u32> {
-            Some(*self.total.lock().unwrap() as u32)
+        fn predict(&self) -> u32 {
+            *self.total.lock().unwrap() as u32
         }
 
         fn should_prune(&self) -> bool {
@@ -321,24 +324,22 @@ mod tests {
         }
 
         fn new_instance(&self) -> Self {
-            AveragingHandler::new()
+            SummingHandler::new()
         }
 
-        fn fold(&self, predictions: Vec<u32>) -> Option<u32> {
+        fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
             if predictions.is_empty() {
                 return None;
             }
-            let sum = predictions.iter().sum::<u32>();
-            let len = predictions.len() as u32;
-            Some((sum + len / 2) / len)
+            Some(predictions.iter().sum())
         }
     }
 
     #[test]
-    fn test_multi_value_prediction_with_custom_fold() {
+    fn test_multi_value_prediction_with_custom_resolve() {
         let tree = LogicTree::new(
             vec!["country".to_string(), "format".to_string()],
-            AveragingHandler::new(),
+            SummingHandler::new(),
         );
 
         // Train banner format with value 100
@@ -361,14 +362,16 @@ mod tests {
         )
         .unwrap();
 
-        // Predict with multi-value format - should average banner (100) and video (200) = 150
         let res = tree.predict(vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(res, Ok(Some(150)), "Should average banner (100) and video (200) predictions");
+        assert_eq!(
+            res,
+            Ok(Some(300)),
+            "Should sum banner (100) and video (200) = 300"
+        );
 
-        // Single-value prediction should still work
         let res = tree.predict(vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
@@ -379,7 +382,11 @@ mod tests {
     #[test]
     fn test_multi_value_mixed_with_single_value() {
         let tree = LogicTree::new(
-            vec!["country".to_string(), "device".to_string(), "format".to_string()],
+            vec![
+                "country".to_string(),
+                "device".to_string(),
+                "format".to_string(),
+            ],
             TestHandler::new(),
         );
 
@@ -417,7 +424,11 @@ mod tests {
     #[test]
     fn test_ctv_use_case() {
         let tree = LogicTree::new(
-            vec!["country".to_string(), "device".to_string(), "format".to_string()],
+            vec![
+                "country".to_string(),
+                "device".to_string(),
+                "format".to_string(),
+            ],
             TestHandler::new(),
         );
 
@@ -519,47 +530,55 @@ mod tests {
 
         let res = loaded.predict(vec![
             Feature::string("country", "usa"),
-            Feature::string("format", "banner"),
+            Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(res, Ok(Some(42)), "Loaded tree should preserve multi-value structure");
-
-        let res = loaded.predict(vec![
-            Feature::string("country", "usa"),
-            Feature::string("format", "video"),
-        ]);
-        assert_eq!(res, Ok(Some(42)), "Both branches should exist after deserialization");
+        assert_eq!(
+            res,
+            Ok(Some(42)),
+            "Loaded tree should preserve composite structure"
+        );
 
         fs::remove_file(file).expect("Should delete test file");
     }
 
     #[test]
-    fn test_integer_rounding_in_fold() {
+    fn test_resolve_sums_independent_samples() {
         let tree = LogicTree::new(
             vec!["country".to_string(), "format".to_string()],
-            AveragingHandler::new(),
+            SummingHandler::new(),
         );
 
-        tree.train(vec![
-            Feature::string("country", "usa"),
-            Feature::string("format", "banner"),
-        ], &100).unwrap();
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::string("format", "banner"),
+            ],
+            &100,
+        )
+        .unwrap();
 
-        tree.train(vec![
-            Feature::string("country", "usa"),
-            Feature::string("format", "video"),
-        ], &201).unwrap();
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::string("format", "video"),
+            ],
+            &201,
+        )
+        .unwrap();
 
         let res = tree.predict(vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(res, Ok(Some(151)), "Should round 150.5 up to 151");
+        assert_eq!(
+            res,
+            Ok(Some(301)),
+            "Should sum banner (100) + video (201) = 301"
+        );
     }
 
     #[test]
     fn test_multiple_multi_value_features_in_path() {
-        // Real-world scenario: [country, device, format, network, size]
-        // with multi-value at format and size positions
         let tree = LogicTree::new(
             vec![
                 "country".to_string(),
@@ -571,7 +590,6 @@ mod tests {
             TestHandler::new(),
         );
 
-        // Train with multiple multi-value features in same path
         tree.train(
             vec![
                 Feature::string("country", "usa"),
@@ -584,7 +602,6 @@ mod tests {
         )
         .unwrap();
 
-        // Verify parent nodes see correct counts (no multiplication)
         let res = tree.predict(vec![Feature::string("country", "usa")]);
         assert_eq!(res, Ok(Some(10)), "USA should see 10 (not 20 or 40)");
 
@@ -597,38 +614,395 @@ mod tests {
         let res = tree.predict(vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
-            Feature::string("format", "banner"),
+            Feature::multi_string("format", vec!["banner", "video"]),
             Feature::string("network", "wifi"),
+            Feature::multi_string("size", vec!["300x250", "728x90"]),
         ]);
-        assert_eq!(res, Ok(Some(10)), "Banner->wifi should see 10");
+        assert_eq!(res, Ok(Some(10)), "Composite path should return prediction");
 
-        // Verify all leaf combinations exist (2 formats × 2 sizes = 4 combinations)
-        let combinations = vec![
-            ("banner", "300x250"),
-            ("banner", "728x90"),
-            ("video", "300x250"),
-            ("video", "728x90"),
-        ];
+        let leaf_count = tree.size(true);
+        assert_eq!(leaf_count, 1, "Should have 1 composite leaf node");
+    }
 
-        for (format, size) in combinations {
-            let res = tree.predict(vec![
+    #[test]
+    fn test_composite_key_creation() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(
+            vec![
                 Feature::string("country", "usa"),
-                Feature::string("device", "android"),
-                Feature::string("format", format),
-                Feature::string("network", "wifi"),
-                Feature::string("size", size),
-            ]);
-            assert_eq!(
-                res,
-                Ok(Some(10)),
-                "Leaf node {}->wifi->{} should exist with value 10",
-                format,
-                size
-            );
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(100)),
+            "Composite child should return prediction"
+        );
+    }
+
+    #[test]
+    fn test_composite_key_determinism() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &50,
+        )
+        .unwrap();
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["video", "banner"]),
+            ],
+            &50,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(100)),
+            "Same composite regardless of value order"
+        );
+    }
+
+    #[test]
+    fn test_composite_union_lookup() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            SummingHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::string("format", "banner"),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::string("format", "video"),
+            ],
+            &200,
+        )
+        .unwrap();
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &50,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(350)),
+            "Should sum banner (100) + video (200) + banner|video (50) = 350"
+        );
+    }
+
+    #[test]
+    fn test_composite_with_multiple_composites() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            SummingHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "native"]),
+            ],
+            &200,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(300)),
+            "Should sum banner|video (100) + banner|native (200) = 300"
+        );
+    }
+
+    #[test]
+    fn test_single_value_no_composite() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::string("format", "banner"),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::string("format", "banner"),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(100)),
+            "Single value should not create composite"
+        );
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(100)),
+            "Query for [banner,video] should only find banner (no composite)"
+        );
+    }
+
+    #[test]
+    fn test_composite_deeper_children() {
+        let tree = LogicTree::new(
+            vec![
+                "country".to_string(),
+                "format".to_string(),
+                "size".to_string(),
+            ],
+            TestHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "video"]),
+                Feature::string("size", "300x250"),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+            Feature::string("size", "300x250"),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(100)),
+            "Composite child should have deeper children"
+        );
+    }
+
+    #[test]
+    fn test_single_value_query_includes_composites() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            SummingHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::string("format", "banner"),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &50,
+        )
+        .unwrap();
+
+        let res = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::string("format", "banner"),
+        ]);
+        assert_eq!(
+            res,
+            Ok(Some(150)),
+            "Query [banner] should sum banner (100) + banner|video (50) = 150"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Feature value cannot contain null bytes")]
+    fn test_null_byte_validation_single() {
+        Feature::string("format", "banner\x00video");
+    }
+
+    #[test]
+    #[should_panic(expected = "Feature value cannot contain null bytes")]
+    fn test_null_byte_validation_multi() {
+        Feature::multi_string("format", vec!["banner", "video\x00native"]);
+    }
+
+    #[test]
+    fn test_composite_index_cleanup_on_prune() {
+        #[derive(Serialize, Deserialize)]
+        struct PrunableHandler {
+            total: Mutex<u32>,
+            should_prune_flag: Mutex<bool>,
         }
 
-        // Verify count: should have 4 leaf nodes (banner×2 sizes + video×2 sizes)
-        let leaf_count = tree.size(true);
-        assert_eq!(leaf_count, 4, "Should have 4 leaf nodes (2 formats × 2 sizes)");
+        impl Clone for PrunableHandler {
+            fn clone(&self) -> Self {
+                PrunableHandler {
+                    total: Mutex::new(*self.total.lock().unwrap()),
+                    should_prune_flag: Mutex::new(*self.should_prune_flag.lock().unwrap()),
+                }
+            }
+        }
+
+        impl PrunableHandler {
+            fn new() -> Self {
+                PrunableHandler {
+                    total: Mutex::new(0),
+                    should_prune_flag: Mutex::new(false),
+                }
+            }
+        }
+
+        impl PredictionHandler<u32, u32> for PrunableHandler {
+            fn train(&self, input: &u32) {
+                *self.total.lock().unwrap() += input;
+            }
+
+            fn predict(&self) -> u32 {
+                *self.total.lock().unwrap()
+            }
+
+            fn should_prune(&self) -> bool {
+                *self.should_prune_flag.lock().unwrap()
+            }
+
+            fn new_instance(&self) -> Self {
+                PrunableHandler::new()
+            }
+
+            fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
+                Some(predictions.iter().sum())
+            }
+        }
+
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            PrunableHandler::new(),
+        );
+
+        tree.train(
+            vec![
+                Feature::string("country", "usa"),
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        let res_before = tree.predict(vec![
+            Feature::string("country", "usa"),
+            Feature::string("format", "banner"),
+        ]);
+        assert_eq!(
+            res_before,
+            Ok(Some(100)),
+            "Should find banner|video composite"
+        );
+
+        tree.prune();
+    }
+
+    #[test]
+    fn test_consecutive_multi_value_features() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        // Train with consecutive multi-value features
+        tree.train(
+            vec![
+                Feature::multi_string("country", vec!["USA", "Canada"]),
+                Feature::multi_string("format", vec!["banner", "video"]),
+            ],
+            &100,
+        )
+        .unwrap();
+
+        // All these should return 100 (no double counting, no aggregation)
+
+        // Single country matches the composite
+        let res = tree.predict(vec![Feature::string("country", "USA")]);
+        assert_eq!(res, Ok(Some(100)), "Single country should return 100");
+
+        // Single country + single format
+        let res = tree.predict(vec![
+            Feature::string("country", "USA"),
+            Feature::string("format", "banner"),
+        ]);
+        assert_eq!(res, Ok(Some(100)), "USA + banner should return 100");
+
+        // Single country + multi format
+        let res = tree.predict(vec![
+            Feature::string("country", "USA"),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(res, Ok(Some(100)), "USA + [banner,video] should return 100");
+
+        // Multi country + multi format (exact training match)
+        let res = tree.predict(vec![
+            Feature::multi_string("country", vec!["USA", "Canada"]),
+            Feature::multi_string("format", vec!["banner", "video"]),
+        ]);
+        assert_eq!(res, Ok(Some(100)), "[USA,Canada] + [banner,video] should return 100");
     }
 }

@@ -24,18 +24,18 @@
 ///
 /// # Multi-Value Features
 ///
-/// The `fold()` method is required for all implementations. If you don't use multi-value
-/// features, you can implement it with `unreachable!()` or `panic!()` as it will never be called.
+/// The `resolve()` method is responsible for aggregating peer feature predictions
+/// and for implementing logic to determine if the aggregate prediction(s) at a
+/// node depth are sufficient, or if the prediction responsibility should be passed
+/// upwards to the next parent node.
 pub trait PredictionHandler<I, O>: Send + Sync {
     /// Online update this prediction handler with a new training event,
     /// e.g. record new visit(s), sales, whatever
     fn train(&self, input: &I);
 
-    /// Make a prediction for this associated node,
-    /// or if insufficient activity exists at this node depth
-    /// yet (e.g. too few visits yet) may return an empty
-    /// option to pass the decision up to the broader parent
-    fn predict(&self) -> Option<O>;
+    /// Make a prediction for this associated node.
+    /// Always returns a prediction value for internal state.
+    fn predict(&self) -> O;
 
     /// Evaluation method which enables implementation of expiry
     /// logic for tree nodes. E.g. if a node has not seen activity
@@ -51,19 +51,19 @@ pub trait PredictionHandler<I, O>: Send + Sync {
     where
         Self: Sized;
 
-    /// Aggregate predictions from peer child nodes when using multi-valued features.
+    /// Resolve predictions from child nodes into a final result.
     ///
     /// When a feature has multiple values (e.g., format=[banner, video]), this method
-    /// combines the predictions from sibling nodes at the same tree depth before
-    /// returning the result up the hierarchy.
+    /// combines the predictions from sibling nodes at the same tree depth and decides
+    /// if the aggregate is sufficient to make a prediction.
     ///
-    /// The `predictions` vector is guaranteed to have **2 or more** elements when called.
-    /// Single predictions are returned directly without calling fold.
+    /// The `predictions` vector will have **1 or more** elements. This method is responsible
+    /// for both aggregating multiple predictions AND deciding if the aggregate (or single
+    /// prediction) is sufficient to return (Some) or should defer to parent (None).
     ///
     /// # Example implementations
-    /// - Average: `Some(predictions.iter().sum() / predictions.len())`
+    /// - Average with threshold: `if total_samples >= min { Some(avg) } else { None }`
     /// - Maximum: `predictions.into_iter().max()`
-    /// - Sum: `Some(predictions.iter().sum())`
-    /// - No-op (if not using multi-value): `unreachable!("not using multi-value features")`
-    fn fold(&self, predictions: Vec<O>) -> Option<O>;
+    /// - Sum with sufficiency: `if sufficient_data { Some(sum) } else { None }`
+    fn resolve(&self, predictions: Vec<O>) -> Option<O>;
 }
