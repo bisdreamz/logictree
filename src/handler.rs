@@ -57,13 +57,16 @@ pub trait PredictionHandler<I, O>: Send + Sync {
     /// combines the predictions from sibling nodes at the same tree depth and decides
     /// if the aggregate is sufficient to make a prediction.
     ///
-    /// The `predictions` vector will have **1 or more** elements. This method is responsible
-    /// for both aggregating multiple predictions AND deciding if the aggregate (or single
-    /// prediction) is sufficient to return (Some) or should defer to parent (None).
+    /// The `predictions` vector contains tuples of (value, depth) where depth indicates
+    /// the tree level where each prediction came from (0=root, 1=after first feature, etc).
+    /// All predictions in the vector will be at the same depth level.
+    /// This method is responsible for both aggregating multiple predictions AND deciding
+    /// if the aggregate (or single prediction) is sufficient to return (Some) or should
+    /// defer to parent (None).
     ///
     /// # Example implementations
     /// - Average with threshold: `if total_samples >= min { Some(avg) } else { None }`
-    /// - Maximum: `predictions.into_iter().max()`
+    /// - Maximum: `predictions.into_iter().map(|(v, _)| v).max()`
     /// - Sum with sufficiency: `if sufficient_data { Some(sum) } else { None }`
-    fn resolve(&self, predictions: Vec<O>) -> Option<O>;
+    fn resolve(&self, predictions: Vec<(O, usize)>) -> Option<O>;
 }

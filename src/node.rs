@@ -86,49 +86,36 @@ where
         }
     }
 
-    fn collect_direct_predictions(&self, values: &[Value], stack: &[Feature]) -> Vec<O> {
+    fn collect_direct_predictions(&self, values: &[Value], stack: &[Feature], depth: usize) -> Vec<(O, usize)> {
         values
             .iter()
             .filter_map(|value| {
                 self.children
                     .get(value)
-                    .and_then(|child| child.predict(stack))
+                    .and_then(|child| {
+                        let (result, d) = child.predict(stack, depth);
+                        result.map(|v| (v, d))
+                    })
             })
             .collect()
     }
 
-    fn collect_composite_predictions(&self, values: &[Value], stack: &[Feature]) -> Vec<O> {
+    fn collect_composite_predictions(&self, values: &[Value], stack: &[Feature], depth: usize) -> Vec<(O, usize)> {
         let mut seen = HashSet::new();
-        let mut predictions = Vec::new();
-
-        for value in values {
-            let composites = match self.composite_index.get(value) {
-                Some(composites) => composites,
-                None => continue,
-            };
-
-            for composite_key in composites.iter() {
-                if seen.insert(composite_key.clone()) {
-                    if let Some(prediction) = self
-                        .children
-                        .get(composite_key)
-                        .and_then(|child| child.predict(stack))
-                    {
-                        predictions.push(prediction);
-                    }
-                }
-            }
-        }
-
-        predictions
+        values
+            .iter()
+            .filter_map(|value| self.composite_index.get(value).map(|c| c.clone()))
+            .flatten()
+            .filter(|key| seen.insert(key.clone()))
+            .filter_map(|key| {
+                self.children.get(&key).and_then(|child| {
+                    let (result, d) = child.predict(stack, depth);
+                    result.map(|v| (v, d))
+                })
+            })
+            .collect()
     }
 
-    fn aggregate_predictions(&self, predictions: Vec<O>) -> Option<O> {
-        match predictions.len() {
-            0 => Some(self.handler.predict()), // no children, as the parent we will predict
-            _ => self.handler.resolve(predictions), // resolve and return aggregate predictions
-        }
-    }
 
     /// Predicts by collecting predictions from all matching paths using union semantics.
     ///
@@ -150,18 +137,24 @@ where
     ///
     /// Result: resolve([banner, banner|video, banner|native])
     /// ```
-    pub fn predict(&self, stack: &[Feature]) -> Option<O> {
-        if stack.is_empty() {
-            return Some(self.handler.predict());
+    pub fn predict(&self, stack: &[Feature], depth: usize) -> (Option<O>, usize) {
+        if !stack.is_empty() {
+            let feat = &stack[0];
+            let next_stack = &stack[1..];
+            let next_depth = depth + 1;
+
+            let mut predictions = self.collect_direct_predictions(&feat.values, next_stack, next_depth);
+            predictions.extend(self.collect_composite_predictions(&feat.values, next_stack, next_depth));
+
+            if !predictions.is_empty() {
+                let actual_depth = predictions.iter().map(|(_, d)| *d).max().unwrap_or(depth);
+                return (self.handler.resolve(predictions), actual_depth);
+            }
         }
 
-        let feat = &stack[0];
-        let next_stack = &stack[1..];
-
-        let mut predictions = self.collect_direct_predictions(&feat.values, next_stack);
-        predictions.extend(self.collect_composite_predictions(&feat.values, next_stack));
-
-        self.aggregate_predictions(predictions)
+        let value = self.handler.predict();
+        let resolved = self.handler.resolve(vec![(value, depth)]);
+        (resolved, depth)
     }
 
     pub(crate) fn should_prune(&self) -> bool {

@@ -1,6 +1,6 @@
 use crate::feature::Value;
 use crate::node::Node;
-use crate::{Feature, PredictionHandler};
+use crate::{Feature, PredictionHandler, PredictionResult};
 use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -161,7 +161,7 @@ where
     /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
     /// #     fn new_instance(&self) -> Self { H::new() }
-    /// #     fn resolve(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum()) }
+    /// #     fn resolve(&self, p: Vec<(u32, usize)>) -> Option<u32> { Some(p.iter().map(|(v, _)| v).sum()) }
     /// # }
     /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
     /// // Train with multi-value feature
@@ -202,6 +202,11 @@ where
     /// # Arguments
     /// * `features` - Feature vector in the same order as specified in constructor
     ///
+    /// # Returns
+    /// * `Ok(Some(PredictionResult))` - Prediction found with value, depth, and full_depth flag
+    /// * `Ok(None)` - No prediction available (e.g., all untrained paths or handlers returned None)
+    /// * `Err(String)` - Invalid input (wrong feature order, non-contiguous features, etc.)
+    ///
     /// # Constraints
     /// - Features must be in the correct order
     /// - Contiguous values required (e.g., `[a,b]` valid, `[a,c]` invalid for tree `[a,b,c]`)
@@ -220,7 +225,7 @@ where
     /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
     /// #     fn new_instance(&self) -> Self { H::new() }
-    /// #     fn resolve(&self, p: Vec<u32>) -> Option<u32> { Some(p.iter().sum()) }
+    /// #     fn resolve(&self, p: Vec<(u32, usize)>) -> Option<u32> { Some(p.iter().map(|(v, _)| v).sum()) }
     /// # }
     /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
     /// # tree.train(&vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &100).unwrap();
@@ -233,24 +238,29 @@ where
     ///
     /// // Returns: Sum of banner (100) and video (200) = 300
     /// ```
-    pub fn predict(&self, features: &Vec<Feature>) -> Result<Option<O>, String> {
+    pub fn predict(&self, features: &Vec<Feature>) -> Result<Option<PredictionResult<O>>, String> {
         self.validate(&features)?;
 
-        let res = self
+        let (value, depth) = self
             .root
             .get(&Self::root_value())
             .expect("should have root node!")
-            .predict(features);
+            .predict(features, 0);
 
-        Ok(res)
+        Ok(value.map(|v| PredictionResult {
+            value: v,
+            depth,
+            full_depth: depth == self.features.len(),
+        }))
     }
 
     /// Convenience method to predict based on map input of key -> feature values, and the
-    /// tree handles organizing feature order. See `predict` in which the same validation rules apply.
+    /// tree handles organizing feature order. Returns the same `PredictionResult` as `predict()`.
+    /// See `predict` for validation rules and return value details.
     pub fn predict_map(
         &self,
         data: std::collections::HashMap<&str, Feature>,
-    ) -> Result<Option<O>, String> {
+    ) -> Result<Option<PredictionResult<O>>, String> {
         self.predict(&self.extract(&data)?)
     }
 

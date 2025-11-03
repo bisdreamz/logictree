@@ -22,7 +22,7 @@
 //! # Quick Start
 //!
 //! ```rust
-//! use logictree::{LogicTree, PredictionHandler, Feature};
+//! use logictree::{LogicTree, PredictionHandler, Feature, PredictionResult};
 //! use std::sync::Mutex;
 //! # use serde::{Serialize, Deserialize};
 //!
@@ -48,9 +48,9 @@
 //!         *self.count.lock().unwrap()
 //!     }
 //!
-//!     fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
+//!     fn resolve(&self, predictions: Vec<(u32, usize)>) -> Option<u32> {
 //!         // Sum independent samples from peer nodes (for multi-value features)
-//!         Some(predictions.iter().sum())
+//!         Some(predictions.iter().map(|(v, _)| v).sum())
 //!     }
 //!
 //!     fn should_prune(&self) -> bool { false }
@@ -76,7 +76,16 @@
 //! let result = tree.predict(&vec![
 //!     Feature::string("country", "USA"),
 //!     Feature::multi_string("format", vec!["banner", "video"]),
-//! ]).unwrap();
+//! ]).unwrap()
+//! .map(|r| r.value);
+//!
+//! // 5. Check prediction depth information
+//! let prediction = tree.predict(&vec![
+//!     Feature::string("country", "USA"),
+//! ]).unwrap().unwrap();
+//!
+//! assert_eq!(prediction.depth, 1);        // Prediction from depth 1 (after first feature)
+//! assert_eq!(prediction.full_depth, false); // Not at full depth (tree has 2 features)
 //! ```
 //!
 //! # Performance
@@ -97,6 +106,23 @@ mod feature;
 mod handler;
 mod logictree;
 mod node;
+
+/// Result from a tree prediction containing the value and depth information
+///
+/// # Fields
+/// * `value` - The predicted value returned by the handler
+/// * `depth` - The depth in the tree where this prediction was found:
+///   - 0 = root node (before any features)
+///   - 1 = after first feature
+///   - 2 = after second feature
+///   - etc.
+/// * `full_depth` - Whether this prediction is from the deepest possible level (all features matched)
+#[derive(Debug, Clone, PartialEq)]
+pub struct PredictionResult<O> {
+    pub value: O,
+    pub depth: usize,
+    pub full_depth: bool,
+}
 
 pub use feature::*;
 pub use handler::*;
@@ -147,36 +173,42 @@ mod tests {
             TestHandler::new()
         }
 
-        fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
-            predictions.into_iter().next()
+        fn resolve(&self, predictions: Vec<(u32, usize)>) -> Option<u32> {
+            predictions.into_iter().map(|(v, _)| v).next()
         }
     }
 
     fn test_map_assertions(tree: &LogicTree<u32, u32, TestHandler>) {
-        let res = tree.predict(&vec![Feature::string("one", "foo")]);
+        let res = tree.predict(&vec![Feature::string("one", "foo")])
+            .unwrap()
+            .map(|r| r.value);
         assert_eq!(
             res,
-            Ok(Some(20)),
+            Some(20),
             "Foo parent prediction should equal sum of parent and children"
         );
 
         let res = tree.predict(&vec![
             Feature::string("one", "foo"),
             Feature::string("two", "bar"),
-        ]);
+        ])
+        .unwrap()
+        .map(|r| r.value);
         assert_eq!(
             res,
-            Ok(Some(10)),
+            Some(10),
             "Foo.bar prediction should equal node specific training value"
         );
 
         let res = tree.predict(&vec![
             Feature::string("one", "foo"),
             Feature::string("two", "dang"),
-        ]);
+        ])
+        .unwrap()
+        .map(|r| r.value);
         assert_eq!(
             res,
-            Ok(Some(20)),
+            Some(20),
             "Non existent foo.dang should return parent summary of foo"
         );
 
@@ -260,33 +292,25 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(&vec![Feature::string("country", "usa")]);
-        assert_eq!(
-            res,
-            Ok(Some(10)),
-            "USA node should see 10 (not 20 from double-counting)"
-        );
+        let res = tree.predict(&vec![Feature::string("country", "usa")]).unwrap().unwrap();
+        assert_eq!(res.value, 10, "USA node should see 10 (not 20 from double-counting)");
+        assert_eq!(res.depth, 1, "Should be at depth 1 after consuming country feature");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
-        ]);
-        assert_eq!(
-            res,
-            Ok(Some(10)),
-            "USA->android node should see 10 (not 20)"
-        );
+        ]).unwrap().unwrap();
+        assert_eq!(res.value, 10, "USA->android node should see 10 (not 20)");
+        assert_eq!(res.depth, 2, "Should be at depth 2 after consuming two features");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
             Feature::multi_string("format", vec!["banner", "video"]),
-        ]);
-        assert_eq!(
-            res,
-            Ok(Some(10)),
-            "Composite banner|video should exist with value 10"
-        );
+        ]).unwrap().unwrap();
+        assert_eq!(res.value, 10, "Composite banner|video should exist with value 10");
+        assert_eq!(res.depth, 3, "Should be at depth 3 after consuming all features");
+        assert_eq!(res.full_depth, true, "Should be full depth with all 3 features");
     }
 
     #[derive(Serialize, Deserialize)]
@@ -327,11 +351,11 @@ mod tests {
             SummingHandler::new()
         }
 
-        fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
+        fn resolve(&self, predictions: Vec<(u32, usize)>) -> Option<u32> {
             if predictions.is_empty() {
                 return None;
             }
-            Some(predictions.iter().sum())
+            Some(predictions.iter().map(|(v, _)| v).sum())
         }
     }
 
@@ -366,17 +390,13 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(300)),
-            "Should sum banner (100) and video (200) = 300"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(300), "Should sum banner (100) and video (200) = 300");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
-        assert_eq!(res, Ok(Some(100)), "Single banner prediction should be 100");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "Single banner prediction should be 100");
     }
 
     #[test]
@@ -407,18 +427,22 @@ mod tests {
             Feature::string("device", "android"),
             Feature::string("format", "banner"),
         ]);
-        assert_eq!(res, Ok(Some(5)), "Android->banner should exist");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(5), "Android->banner should exist");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "ios"),
             Feature::string("format", "banner"),
-        ]);
-        assert_eq!(res, Ok(Some(5)), "iOS->banner should exist");
+        ])
+        .unwrap()
+        .map(|r| r.value);
+        assert_eq!(res, Some(5), "iOS->banner should exist");
 
         // Parent should not double-count
-        let res = tree.predict(&vec![Feature::string("country", "usa")]);
-        assert_eq!(res, Ok(Some(5)), "USA should see 5 (not 10)");
+        let res = tree.predict(&vec![Feature::string("country", "usa")])
+        .unwrap()
+        .map(|r| r.value);
+        assert_eq!(res, Some(5), "USA should see 5 (not 10)");
     }
 
     #[test]
@@ -451,13 +475,13 @@ mod tests {
             Feature::string("device", "ctv"),
             Feature::string("format", "video"),
         ]);
-        assert_eq!(res, Ok(Some(10)), "CTV video should have 10 impressions");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(10), "CTV video should have 10 impressions");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "ctv"),
         ]);
-        assert_eq!(res, Ok(Some(10)), "CTV parent should see 10 impressions");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(10), "CTV parent should see 10 impressions");
     }
 
     #[test]
@@ -502,7 +526,7 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
-        assert_eq!(res, Ok(Some(10)), "Duplicate banner should be deduplicated");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(10), "Duplicate banner should be deduplicated");
     }
 
     #[test]
@@ -532,11 +556,7 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(42)),
-            "Loaded tree should preserve composite structure"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(42), "Loaded tree should preserve composite structure");
 
         fs::remove_file(file).expect("Should delete test file");
     }
@@ -569,12 +589,10 @@ mod tests {
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
-        ]);
-        assert_eq!(
-            res,
-            Ok(Some(301)),
-            "Should sum banner (100) + video (201) = 301"
-        );
+        ]).unwrap().unwrap();
+        assert_eq!(res.value, 301, "Should sum banner (100) + video (201) = 301");
+        assert_eq!(res.depth, 2, "Should resolve at depth 2 with both format values");
+        assert_eq!(res.full_depth, true, "Should be full depth for 2-feature tree");
     }
 
     #[test]
@@ -602,14 +620,16 @@ mod tests {
         )
         .unwrap();
 
-        let res = tree.predict(&vec![Feature::string("country", "usa")]);
-        assert_eq!(res, Ok(Some(10)), "USA should see 10 (not 20 or 40)");
+        let res = tree.predict(&vec![Feature::string("country", "usa")])
+        .unwrap()
+        .map(|r| r.value);
+        assert_eq!(res, Some(10), "USA should see 10 (not 20 or 40)");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("device", "android"),
         ]);
-        assert_eq!(res, Ok(Some(10)), "USA->android should see 10");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(10), "USA->android should see 10");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
@@ -618,7 +638,7 @@ mod tests {
             Feature::string("network", "wifi"),
             Feature::multi_string("size", vec!["300x250", "728x90"]),
         ]);
-        assert_eq!(res, Ok(Some(10)), "Composite path should return prediction");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(10), "Composite path should return prediction");
 
         let leaf_count = tree.size(true);
         assert_eq!(leaf_count, 1, "Should have 1 composite leaf node");
@@ -644,11 +664,7 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(100)),
-            "Composite child should return prediction"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "Composite child should return prediction");
     }
 
     #[test]
@@ -680,11 +696,7 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(100)),
-            "Same composite regardless of value order"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "Same composite regardless of value order");
     }
 
     #[test]
@@ -725,11 +737,7 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(350)),
-            "Should sum banner (100) + video (200) + banner|video (50) = 350"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(350), "Should sum banner (100) + video (200) + banner|video (50) = 350");
     }
 
     #[test]
@@ -761,11 +769,7 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(300)),
-            "Should sum banner|video (100) + banner|native (200) = 300"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(300), "Should sum banner|video (100) + banner|native (200) = 300");
     }
 
     #[test]
@@ -788,21 +792,13 @@ mod tests {
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(100)),
-            "Single value should not create composite"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "Single value should not create composite");
 
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(100)),
-            "Query for [banner,video] should only find banner (no composite)"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "Query for [banner,video] should only find banner (no composite)");
     }
 
     #[test]
@@ -831,11 +827,7 @@ mod tests {
             Feature::multi_string("format", vec!["banner", "video"]),
             Feature::string("size", "300x250"),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(100)),
-            "Composite child should have deeper children"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "Composite child should have deeper children");
     }
 
     #[test]
@@ -866,12 +858,10 @@ mod tests {
         let res = tree.predict(&vec![
             Feature::string("country", "usa"),
             Feature::string("format", "banner"),
-        ]);
-        assert_eq!(
-            res,
-            Ok(Some(150)),
-            "Query [banner] should sum banner (100) + banner|video (50) = 150"
-        );
+        ]).unwrap().unwrap();
+        assert_eq!(res.value, 150, "Query [banner] should sum banner (100) + banner|video (50) = 150");
+        assert_eq!(res.depth, 2, "Should find predictions at depth 2");
+        assert_eq!(res.full_depth, true, "Should be full depth for 2-feature tree");
     }
 
     #[test]
@@ -929,8 +919,8 @@ mod tests {
                 PrunableHandler::new()
             }
 
-            fn resolve(&self, predictions: Vec<u32>) -> Option<u32> {
-                Some(predictions.iter().sum())
+            fn resolve(&self, predictions: Vec<(u32, usize)>) -> Option<u32> {
+                Some(predictions.iter().map(|(v, _)| v).sum())
             }
         }
 
@@ -953,8 +943,8 @@ mod tests {
             Feature::string("format", "banner"),
         ]);
         assert_eq!(
-            res_before,
-            Ok(Some(100)),
+            res_before.unwrap().map(|r| r.value),
+            Some(100),
             "Should find banner|video composite"
         );
 
@@ -981,33 +971,31 @@ mod tests {
         // All these should return 100 (no double counting, no aggregation)
 
         // Single country matches the composite
-        let res = tree.predict(&vec![Feature::string("country", "USA")]);
-        assert_eq!(res, Ok(Some(100)), "Single country should return 100");
+        let res = tree.predict(&vec![Feature::string("country", "USA")])
+        .unwrap()
+        .map(|r| r.value);
+        assert_eq!(res, Some(100), "Single country should return 100");
 
         // Single country + single format
         let res = tree.predict(&vec![
             Feature::string("country", "USA"),
             Feature::string("format", "banner"),
         ]);
-        assert_eq!(res, Ok(Some(100)), "USA + banner should return 100");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "USA + banner should return 100");
 
         // Single country + multi format
         let res = tree.predict(&vec![
             Feature::string("country", "USA"),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(res, Ok(Some(100)), "USA + [banner,video] should return 100");
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "USA + [banner,video] should return 100");
 
         // Multi country + multi format (exact training match)
         let res = tree.predict(&vec![
             Feature::multi_string("country", vec!["USA", "Canada"]),
             Feature::multi_string("format", vec!["banner", "video"]),
         ]);
-        assert_eq!(
-            res,
-            Ok(Some(100)),
-            "[USA,Canada] + [banner,video] should return 100"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(100), "[USA,Canada] + [banner,video] should return 100");
     }
 
     #[test]
@@ -1041,11 +1029,7 @@ mod tests {
             Feature::multi_string("format", mixed_formats),          // owned
         ]);
 
-        assert_eq!(
-            res,
-            Ok(Some(42)),
-            "Should predict correctly with mixed owned/borrowed strings"
-        );
+        assert_eq!(res.unwrap().map(|r| r.value), Some(42), "Should predict correctly with mixed owned/borrowed strings");
 
         // Test with iterators too
         let iter_formats = vec!["banner", "native"].into_iter();
@@ -1053,5 +1037,115 @@ mod tests {
             Feature::string("country", "USA"),
             Feature::multi_string("format", iter_formats),
         ]);
+    }
+
+    #[test]
+    fn test_depth_tracking_at_root() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "device".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(&vec![], &10).unwrap();
+
+        let res = tree.predict(&vec![]).unwrap().unwrap();
+        assert_eq!(res.depth, 0, "Root prediction should have depth 0");
+        assert_eq!(res.full_depth, false, "Root is not full depth for 2-feature tree");
+        assert_eq!(res.value, 10);
+    }
+
+    #[test]
+    fn test_depth_tracking_at_level_1() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "device".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(&vec![Feature::string("country", "usa")], &20).unwrap();
+
+        let res = tree.predict(&vec![Feature::string("country", "usa")]).unwrap().unwrap();
+        assert_eq!(res.depth, 1, "Should be at depth 1 after consuming 1 feature");
+        assert_eq!(res.full_depth, false, "Depth 1 is not full depth for 3-feature tree");
+        assert_eq!(res.value, 20);
+    }
+
+    #[test]
+    fn test_depth_tracking_at_full_depth() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "device".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+        ], &30).unwrap();
+
+        let res = tree.predict(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+        ]).unwrap().unwrap();
+
+        assert_eq!(res.depth, 2, "Should be at depth 2 after consuming 2 features");
+        assert_eq!(res.full_depth, true, "Depth 2 is full depth for 2-feature tree");
+        assert_eq!(res.value, 30);
+    }
+
+    #[test]
+    fn test_depth_fallback_to_parent() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "device".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        // Only train at depth 1
+        tree.train(&vec![Feature::string("country", "usa")], &15).unwrap();
+
+        // Predict at depth 2 with unknown path - should fall back to parent
+        let res = tree.predict(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "unknown"),
+        ]).unwrap().unwrap();
+
+        assert_eq!(res.depth, 1, "Should fall back to depth 1 parent");
+        assert_eq!(res.full_depth, false, "Fallback is not full depth");
+        assert_eq!(res.value, 15, "Should get parent value");
+    }
+
+    #[test]
+    fn test_depth_empty_tree_root() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "device".to_string()],
+            TestHandler::new(),
+        );
+
+        // No training, just root handler with initial value 0
+        let res = tree.predict(&vec![]).unwrap().unwrap();
+        assert_eq!(res.depth, 0, "Empty tree root should have depth 0");
+        assert_eq!(res.full_depth, false, "Root is not full depth for 2-feature tree");
+        assert_eq!(res.value, 0, "Should get default handler value");
+    }
+
+    #[test]
+    fn test_depth_partial_path_three_level_tree() {
+        let tree = LogicTree::new(
+            vec!["country".to_string(), "device".to_string(), "format".to_string()],
+            TestHandler::new(),
+        );
+
+        tree.train(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+        ], &25).unwrap();
+
+        // Partial path - only 2 of 3 features
+        let res = tree.predict(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+        ]).unwrap().unwrap();
+
+        assert_eq!(res.depth, 2, "Should be at depth 2");
+        assert_eq!(res.full_depth, false, "Not full depth for 3-feature tree");
+        assert_eq!(res.value, 25);
     }
 }
