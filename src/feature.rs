@@ -77,7 +77,7 @@ impl fmt::Display for Value {
 /// let formats = Feature::multi_string("format", vec!["banner", "video", "banner"]);
 /// // Internally stores: ["banner", "video"]
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Feature {
     /// Feature name (must match tree structure)
     pub key: String,
