@@ -55,7 +55,7 @@ where
     }
 
     pub fn train(&self, stack: &[Feature], input: &I) {
-        self.handler.train(input);
+        self.handler.train(input, stack.first());
 
         if stack.is_empty() {
             return;

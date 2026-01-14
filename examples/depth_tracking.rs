@@ -24,7 +24,7 @@ impl Clone for TestHandler {
 }
 
 impl PredictionHandler<u32, u32> for TestHandler {
-    fn train(&self, input: &u32) {
+    fn train(&self, input: &u32, _next: Option<&Feature>) {
         *self.count.lock().unwrap() += input;
     }
 

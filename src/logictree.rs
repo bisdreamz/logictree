@@ -157,7 +157,7 @@ where
     /// # impl Clone for H { fn clone(&self) -> Self { H { c: Mutex::new(*self.c.lock().unwrap()) } } }
     /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
     /// # impl PredictionHandler<u32, u32> for H {
-    /// #     fn train(&self, input: &u32) { *self.c.lock().unwrap() += input; }
+    /// #     fn train(&self, input: &u32, _next: Option<&Feature>) { *self.c.lock().unwrap() += input; }
     /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
     /// #     fn new_instance(&self) -> Self { H::new() }
@@ -221,7 +221,7 @@ where
     /// # impl Clone for H { fn clone(&self) -> Self { H { c: Mutex::new(*self.c.lock().unwrap()) } } }
     /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
     /// # impl PredictionHandler<u32, u32> for H {
-    /// #     fn train(&self, input: &u32) { *self.c.lock().unwrap() += input; }
+    /// #     fn train(&self, input: &u32, _next: Option<&Feature>) { *self.c.lock().unwrap() += input; }
     /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
     /// #     fn new_instance(&self) -> Self { H::new() }

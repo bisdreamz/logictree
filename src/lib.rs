@@ -40,7 +40,7 @@
 //! # impl MyHandler { fn new() -> Self { MyHandler { count: Mutex::new(0) } } }
 //! #
 //! impl PredictionHandler<u32, u32> for MyHandler {
-//!     fn train(&self, input: &u32) {
+//!     fn train(&self, input: &u32, _next: Option<&Feature>) {
 //!         *self.count.lock().unwrap() += input;
 //!     }
 //!
@@ -157,7 +157,7 @@ mod tests {
     }
 
     impl PredictionHandler<u32, u32> for TestHandler {
-        fn train(&self, input: &u32) -> () {
+        fn train(&self, input: &u32, _next: Option<&Feature>) {
             *self.total.lock().unwrap() += *input as usize;
         }
 
@@ -335,7 +335,7 @@ mod tests {
     }
 
     impl PredictionHandler<u32, u32> for SummingHandler {
-        fn train(&self, input: &u32) -> () {
+        fn train(&self, input: &u32, _next: Option<&Feature>) {
             *self.total.lock().unwrap() += *input as usize;
         }
 
@@ -903,7 +903,7 @@ mod tests {
         }
 
         impl PredictionHandler<u32, u32> for PrunableHandler {
-            fn train(&self, input: &u32) {
+            fn train(&self, input: &u32, _next: Option<&Feature>) {
                 *self.total.lock().unwrap() += input;
             }
 

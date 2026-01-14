@@ -7,6 +7,8 @@
 //! as simple or sophisticated as needed. They must be thread-safe (`Send + Sync`)
 //! for concurrent training and prediction.
 
+use crate::Feature;
+
 /// Trait defining the functional prediction handler at each node.
 ///
 /// Handles training of new data and predictions. Each node in the tree has its own
@@ -30,8 +32,11 @@
 /// upwards to the next parent node.
 pub trait PredictionHandler<I, O>: Send + Sync {
     /// Online update this prediction handler with a new training event,
-    /// e.g. record new visit(s), sales, whatever
-    fn train(&self, input: &I);
+    /// e.g. record new visit(s), sales, whatever.
+    ///
+    /// `next_feature` is the feature that will be consumed next in the tree traversal,
+    /// allowing handlers to track which paths are taken from this node.
+    fn train(&self, input: &I, next_feature: Option<&Feature>);
 
     /// Make a prediction for this associated node.
     /// Always returns a prediction value for internal state.
