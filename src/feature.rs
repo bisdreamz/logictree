@@ -26,6 +26,7 @@ pub enum Value {
     Boolean(bool),
     I32(i32),
     I64(i64),
+    U16(u16),
     U32(u32),
     U64(u64),
 }
@@ -37,6 +38,7 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "(Boolean) {}", b),
             Value::I32(i) => write!(f, "(I32) {}", i),
             Value::I64(i) => write!(f, "(I64) {}", i),
+            Value::U16(u) => write!(f, "(U16) {}", u),
             Value::U32(u) => write!(f, "(U32) {}", u),
             Value::U64(u) => write!(f, "(U64) {}", u),
         }
@@ -141,6 +143,13 @@ impl Feature {
         Feature {
             key: key.to_string(),
             values: smallvec::smallvec![Value::I64(value)],
+        }
+    }
+
+    pub fn u16(key: &str, value: u16) -> Feature {
+        Feature {
+            key: key.to_string(),
+            values: smallvec::smallvec![Value::U16(value)],
         }
     }
 

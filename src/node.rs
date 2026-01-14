@@ -46,6 +46,7 @@ where
                 Value::Boolean(b) => b.to_string(),
                 Value::I32(i) => i.to_string(),
                 Value::I64(i) => i.to_string(),
+                Value::U16(u) => u.to_string(),
                 Value::U32(u) => u.to_string(),
                 Value::U64(u) => u.to_string(),
             })
