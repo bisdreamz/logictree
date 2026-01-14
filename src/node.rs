@@ -30,8 +30,8 @@ where
     pub fn new(handler: Arc<H>) -> Node<I, O, H> {
         Node {
             handler,
-            children: DashMap::with_capacity(0),
-            composite_index: DashMap::new(),
+            children: DashMap::with_capacity_and_shard_amount(0, 2),
+            composite_index: DashMap::with_capacity_and_shard_amount(0, 2),
             _phantom: PhantomData,
         }
     }
