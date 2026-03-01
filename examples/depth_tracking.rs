@@ -1,6 +1,6 @@
-use logictree::{LogicTree, Feature, PredictionHandler};
+use logictree::{Feature, LogicTree, PredictionHandler};
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 struct TestHandler {
@@ -51,72 +51,99 @@ impl PredictionHandler<u32, u32> for TestHandler {
 
 fn main() {
     let tree = LogicTree::new(
-        vec!["country".to_string(), "device".to_string(), "format".to_string()],
+        vec![
+            "country".to_string(),
+            "device".to_string(),
+            "format".to_string(),
+        ],
         TestHandler::new(),
     );
 
     // Train at different depths
-    tree.train(&vec![
-        Feature::string("country", "usa"),
-    ], &10).unwrap();
+    tree.train(&vec![Feature::string("country", "usa")], &10)
+        .unwrap();
 
-    tree.train(&vec![
-        Feature::string("country", "usa"),
-        Feature::string("device", "ios"),
-    ], &20).unwrap();
+    tree.train(
+        &vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+        ],
+        &20,
+    )
+    .unwrap();
 
-    tree.train(&vec![
-        Feature::string("country", "usa"),
-        Feature::string("device", "ios"),
-        Feature::string("format", "banner"),
-    ], &30).unwrap();
+    tree.train(
+        &vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+            Feature::string("format", "banner"),
+        ],
+        &30,
+    )
+    .unwrap();
 
     // Test predictions at different depths
     println!("\nPredicting at root (0 features):");
     let res = tree.predict(&vec![]).unwrap();
     if let Some(pred) = res {
-        println!("Result: value={}, depth={}, full_depth={}",
-                 pred.value, pred.depth, pred.full_depth);
+        println!(
+            "Result: value={}, depth={}, full_depth={}",
+            pred.value, pred.depth, pred.full_depth
+        );
     }
 
     println!("\nPredicting at depth 1 (country=usa):");
-    let res = tree.predict(&vec![
-        Feature::string("country", "usa"),
-    ]).unwrap();
+    let res = tree
+        .predict(&vec![Feature::string("country", "usa")])
+        .unwrap();
     if let Some(pred) = res {
-        println!("Result: value={}, depth={}, full_depth={}",
-                 pred.value, pred.depth, pred.full_depth);
+        println!(
+            "Result: value={}, depth={}, full_depth={}",
+            pred.value, pred.depth, pred.full_depth
+        );
     }
 
     println!("\nPredicting at depth 2 (country=usa, device=ios):");
-    let res = tree.predict(&vec![
-        Feature::string("country", "usa"),
-        Feature::string("device", "ios"),
-    ]).unwrap();
+    let res = tree
+        .predict(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+        ])
+        .unwrap();
     if let Some(pred) = res {
-        println!("Result: value={}, depth={}, full_depth={}",
-                 pred.value, pred.depth, pred.full_depth);
+        println!(
+            "Result: value={}, depth={}, full_depth={}",
+            pred.value, pred.depth, pred.full_depth
+        );
     }
 
     println!("\nPredicting at depth 3 (full path):");
-    let res = tree.predict(&vec![
-        Feature::string("country", "usa"),
-        Feature::string("device", "ios"),
-        Feature::string("format", "banner"),
-    ]).unwrap();
+    let res = tree
+        .predict(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "ios"),
+            Feature::string("format", "banner"),
+        ])
+        .unwrap();
     if let Some(pred) = res {
-        println!("Result: value={}, depth={}, full_depth={}",
-                 pred.value, pred.depth, pred.full_depth);
+        println!(
+            "Result: value={}, depth={}, full_depth={}",
+            pred.value, pred.depth, pred.full_depth
+        );
     }
 
     println!("\nPredicting unknown path (falls back to parent):");
-    let res = tree.predict(&vec![
-        Feature::string("country", "usa"),
-        Feature::string("device", "android"),  // not trained
-    ]).unwrap();
+    let res = tree
+        .predict(&vec![
+            Feature::string("country", "usa"),
+            Feature::string("device", "android"), // not trained
+        ])
+        .unwrap();
     if let Some(pred) = res {
-        println!("Result: value={}, depth={}, full_depth={}",
-                 pred.value, pred.depth, pred.full_depth);
+        println!(
+            "Result: value={}, depth={}, full_depth={}",
+            pred.value, pred.depth, pred.full_depth
+        );
         println!("  (Note: fell back to parent at depth 1)");
     }
 }
