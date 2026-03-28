@@ -191,6 +191,7 @@ impl Feature {
     /// let owned_formats = vec!["banner".to_string(), "video".to_string()];
     /// let formats = Feature::multi_string("format", owned_formats);
     /// ```
+    /// Caller must not pass duplicate values.
     pub fn multi_string<I, S>(key: &str, values: I) -> Feature
     where
         I: IntoIterator<Item = S>,
@@ -210,9 +211,7 @@ impl Feature {
         }
     }
 
-    /// Creates a multi-value boolean feature.
-    ///
-    /// The caller must ensure no duplicate values are provided.
+    /// Caller must not pass duplicate values.
     pub fn multi_boolean(key: &str, values: Vec<bool>) -> Feature {
         Feature {
             key: key.to_string(),
@@ -220,9 +219,7 @@ impl Feature {
         }
     }
 
-    /// Creates a multi-value i32 feature.
-    ///
-    /// The caller must ensure no duplicate values are provided.
+    /// Caller must not pass duplicate values.
     pub fn multi_i32(key: &str, values: Vec<i32>) -> Feature {
         Feature {
             key: key.to_string(),
@@ -230,9 +227,7 @@ impl Feature {
         }
     }
 
-    /// Creates a multi-value i64 feature.
-    ///
-    /// The caller must ensure no duplicate values are provided.
+    /// Caller must not pass duplicate values.
     pub fn multi_i64(key: &str, values: Vec<i64>) -> Feature {
         Feature {
             key: key.to_string(),
@@ -240,9 +235,7 @@ impl Feature {
         }
     }
 
-    /// Creates a multi-value u32 feature.
-    ///
-    /// The caller must ensure no duplicate values are provided.
+    /// Caller must not pass duplicate values.
     pub fn multi_u32(key: &str, values: Vec<u32>) -> Feature {
         Feature {
             key: key.to_string(),
@@ -250,9 +243,7 @@ impl Feature {
         }
     }
 
-    /// Creates a multi-value u64 feature.
-    ///
-    /// The caller must ensure no duplicate values are provided.
+    /// Caller must not pass duplicate values.
     pub fn multi_u64(key: &str, values: Vec<u64>) -> Feature {
         Feature {
             key: key.to_string(),

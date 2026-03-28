@@ -52,6 +52,7 @@ where
         }
     }
 
+    /// Serialize this tree to a binary file at the given path using bincode.
     pub fn save(&self, path: &str) -> Result<(), String>
     where
         H: Serialize,
@@ -61,6 +62,7 @@ where
         std::fs::write(path, bytes).map_err(|e| e.to_string())
     }
 
+    /// Deserialize a tree from a binary file previously written by [`save()`](Self::save).
     pub fn load(path: &str) -> Result<Self, String>
     where
         H: DeserializeOwned,
@@ -149,29 +151,28 @@ where
     /// - Any feature has empty values
     ///
     /// # Example
-    /// ```
-    /// # use logictree::{LogicTree, Feature, PredictionHandler};
-    /// # use std::sync::Mutex;
+    /// ```rust
+    /// # use logictree::{LogicTree, PredictionHandler, Feature};
+    /// # use smallvec::SmallVec;
     /// # use serde::{Serialize, Deserialize};
-    /// # #[derive(Serialize, Deserialize)] struct H { c: Mutex<u32> }
-    /// # impl Clone for H { fn clone(&self) -> Self { H { c: Mutex::new(*self.c.lock().unwrap()) } } }
-    /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
+    /// # use std::sync::Mutex;
+    /// # #[derive(Serialize, Deserialize)]
+    /// # struct H { total: Mutex<u32> }
+    /// # impl Clone for H { fn clone(&self) -> Self { H { total: Mutex::new(*self.total.lock().unwrap()) } } }
     /// # impl PredictionHandler<u32, u32> for H {
-    /// #     fn train(&self, input: &u32, _next: Option<&Feature>) { *self.c.lock().unwrap() += input; }
-    /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
+    /// #     fn train(&self, input: &u32, _: Option<&Feature>) { *self.total.lock().unwrap() += input; }
+    /// #     fn predict(&self) -> u32 { *self.total.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
-    /// #     fn new_instance(&self) -> Self { H::new() }
-    /// #     fn resolve(&self, p: Vec<(u32, usize)>) -> Option<u32> { Some(p.iter().map(|(v, _)| v).sum()) }
+    /// #     fn new_instance(&self) -> Self { H { total: Mutex::new(0) } }
+    /// #     fn resolve(&self, p: SmallVec<[(u32, usize); 1]>) -> Option<(u32, usize)> { p.into_iter().max_by_key(|(v,_)| *v) }
     /// # }
-    /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
-    /// // Train with multi-value feature
+    /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H { total: Mutex::new(0) });
     /// tree.train(&vec![
     ///     Feature::string("country", "USA"),
     ///     Feature::multi_string("format", vec!["banner", "video"]),
     /// ], &10).unwrap();
-    ///
-    /// // Result: USA node sees 10, banner node sees 10, video node sees 10
-    /// // (Not 20 for USA!)
+    /// // USA node sees 10, banner node sees 10, video node sees 10
+    /// // (Not 20 for USA — parent trained once, children trained individually)
     /// ```
     pub fn train(&self, features: &Vec<Feature>, update: &I) -> Result<(), String> {
         self.validate(&features)?;
@@ -184,6 +185,9 @@ where
         Ok(())
     }
 
+    /// Convenience method to train from a map of key -> feature values.
+    /// The tree handles organizing features into the correct order.
+    /// See [`train()`](Self::train) for validation rules and error details.
     pub fn train_map(
         &self,
         data: std::collections::HashMap<&str, Feature>,
@@ -194,10 +198,10 @@ where
 
     /// Make a prediction for the associated feature vector.
     ///
-    /// Attempts to make a prediction at the deepest matching node first, walking up the tree
-    /// to parent nodes and returning the first non-None result. For multi-value features,
-    /// predictions from all matching child nodes are aggregated using the PredictionHandler's
-    /// `resolve()` method. If `resolve()` returns None, falls back to the parent node's prediction.
+    /// Traverses the tree from root to the deepest matching node. At each level, the node's
+    /// `resolve()` decides whether the child predictions are sufficient or should defer to
+    /// the parent. For multi-value features, predictions from all matching children are
+    /// passed to `resolve()` for aggregation/selection.
     ///
     /// # Arguments
     /// * `features` - Feature vector in the same order as specified in constructor
@@ -213,30 +217,31 @@ where
     /// - Full feature chain not required (partial paths acceptable)
     ///
     /// # Example
-    /// ```
-    /// # use logictree::{LogicTree, Feature, PredictionHandler};
-    /// # use std::sync::Mutex;
+    /// ```rust
+    /// # use logictree::{LogicTree, PredictionHandler, Feature};
+    /// # use smallvec::SmallVec;
     /// # use serde::{Serialize, Deserialize};
-    /// # #[derive(Serialize, Deserialize)] struct H { c: Mutex<u32> }
-    /// # impl Clone for H { fn clone(&self) -> Self { H { c: Mutex::new(*self.c.lock().unwrap()) } } }
-    /// # impl H { fn new() -> Self { H { c: Mutex::new(0) } } }
+    /// # use std::sync::Mutex;
+    /// # #[derive(Serialize, Deserialize)]
+    /// # struct H { total: Mutex<u32> }
+    /// # impl Clone for H { fn clone(&self) -> Self { H { total: Mutex::new(*self.total.lock().unwrap()) } } }
     /// # impl PredictionHandler<u32, u32> for H {
-    /// #     fn train(&self, input: &u32, _next: Option<&Feature>) { *self.c.lock().unwrap() += input; }
-    /// #     fn predict(&self) -> u32 { *self.c.lock().unwrap() }
+    /// #     fn train(&self, input: &u32, _: Option<&Feature>) { *self.total.lock().unwrap() += input; }
+    /// #     fn predict(&self) -> u32 { *self.total.lock().unwrap() }
     /// #     fn should_prune(&self) -> bool { false }
-    /// #     fn new_instance(&self) -> Self { H::new() }
-    /// #     fn resolve(&self, p: Vec<(u32, usize)>) -> Option<u32> { Some(p.iter().map(|(v, _)| v).sum()) }
+    /// #     fn new_instance(&self) -> Self { H { total: Mutex::new(0) } }
+    /// #     fn resolve(&self, p: SmallVec<[(u32, usize); 1]>) -> Option<(u32, usize)> { p.into_iter().max_by_key(|(v,_)| *v) }
     /// # }
-    /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H::new());
-    /// # tree.train(&vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &100).unwrap();
-    /// # tree.train(&vec![Feature::string("country", "USA"), Feature::string("format", "video")], &200).unwrap();
-    /// // Predict with multi-value feature (aggregates banner + video via resolve)
+    /// # let tree = LogicTree::new(vec!["country".into(), "format".into()], H { total: Mutex::new(0) });
+    /// # tree.train(&vec![Feature::string("country", "USA"), Feature::string("format", "banner")], &10).unwrap();
     /// let result = tree.predict(&vec![
     ///     Feature::string("country", "USA"),
     ///     Feature::multi_string("format", vec!["banner", "video"]),
     /// ]).unwrap();
     ///
-    /// // Returns: Sum of banner (100) and video (200) = 300
+    /// if let Some(pred) = result {
+    ///     println!("value={} depth={} full={}", pred.value, pred.depth, pred.full_depth);
+    /// }
     /// ```
     pub fn predict(&self, features: &Vec<Feature>) -> Result<Option<PredictionResult<O>>, String> {
         self.validate(&features)?;
@@ -264,8 +269,8 @@ where
         self.predict(&self.extract(&data)?)
     }
 
-    /// Perform pruning of the tree per the handlers should_prune logic.
-    /// If this returns true, then the whole map has been pruned (empty)
+    /// Perform pruning of the tree per each handler's `should_prune()` logic.
+    /// Returns true if the root node itself was pruned (entire tree empty).
     pub fn prune(&self) -> bool {
         self.root
             .get(&Self::root_value())
@@ -273,8 +278,8 @@ where
             .should_prune()
     }
 
-    /// Return the count of nodes in this map. Optionally return
-    /// the count of only leaf nodes.
+    /// Return the count of nodes in this tree.
+    /// If `leaf_only` is true, counts only leaf nodes (no children).
     pub fn size(&self, leaf_only: bool) -> u32 {
         self.root
             .get(&Self::root_value())

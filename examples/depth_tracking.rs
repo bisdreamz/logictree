@@ -1,5 +1,6 @@
 use logictree::{Feature, LogicTree, PredictionHandler};
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::sync::Mutex;
 
 #[derive(Serialize, Deserialize)]
@@ -40,12 +41,12 @@ impl PredictionHandler<u32, u32> for TestHandler {
         TestHandler::new()
     }
 
-    fn resolve(&self, predictions: Vec<(u32, usize)>) -> Option<u32> {
+    fn resolve(&self, predictions: SmallVec<[(u32, usize); 1]>) -> Option<(u32, usize)> {
         println!("resolve called with {} predictions:", predictions.len());
         for (value, depth) in &predictions {
             println!("  value: {}, depth: {}", value, depth);
         }
-        predictions.into_iter().map(|(v, _)| v).next()
+        predictions.into_iter().max_by_key(|(v, _)| *v)
     }
 }
 

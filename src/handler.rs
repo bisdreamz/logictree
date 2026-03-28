@@ -8,6 +8,7 @@
 //! for concurrent training and prediction.
 
 use crate::Feature;
+use smallvec::SmallVec;
 
 /// Trait defining the functional prediction handler at each node.
 ///
@@ -58,20 +59,11 @@ pub trait PredictionHandler<I, O>: Send + Sync {
 
     /// Resolve predictions from child nodes into a final result.
     ///
-    /// When a feature has multiple values (e.g., format=[banner, video]), this method
-    /// combines the predictions from sibling nodes at the same tree depth and decides
-    /// if the aggregate is sufficient to make a prediction.
+    /// Called for every prediction path — single-value, multi-value, and fallback.
+    /// Responsible for selecting/aggregating predictions AND deciding if the result
+    /// is sufficient to return or should defer to the parent node.
     ///
-    /// The `predictions` vector contains tuples of (value, depth) where depth indicates
-    /// the tree level where each prediction came from (0=root, 1=after first feature, etc).
-    /// All predictions in the vector will be at the same depth level.
-    /// This method is responsible for both aggregating multiple predictions AND deciding
-    /// if the aggregate (or single prediction) is sufficient to return (Some) or should
-    /// defer to parent (None).
-    ///
-    /// # Example implementations
-    /// - Average with threshold: `if total_samples >= min { Some(avg) } else { None }`
-    /// - Maximum: `predictions.into_iter().map(|(v, _)| v).max()`
-    /// - Sum with sufficiency: `if sufficient_data { Some(sum) } else { None }`
-    fn resolve(&self, predictions: Vec<(O, usize)>) -> Option<O>;
+    /// Each tuple is `(value, depth)` where depth is the tree level it originated from.
+    /// Return the selected `(value, depth)` pair, or `None` to defer to parent.
+    fn resolve(&self, predictions: SmallVec<[(O, usize); 1]>) -> Option<(O, usize)>;
 }
