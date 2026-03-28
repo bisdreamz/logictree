@@ -119,6 +119,50 @@ where
         false
     }
 
+    /// Access the handler at a specific node, creating the target node
+    /// if it doesn't exist. Intermediate (parent) nodes must already
+    /// exist — returns `Err` if any parent along the path is missing,
+    /// which indicates the caller's initialization order is wrong.
+    /// Callers must process nodes in depth order (root first).
+    pub(crate) fn with_node<F>(&self, stack: &[Feature], f: &F, depth: usize) -> Result<(), String>
+    where
+        F: Fn(&H),
+    {
+        if stack.is_empty() {
+            f(&self.handler);
+            return Ok(());
+        }
+
+        let feat = &stack[0];
+        let value = &feat.values[0];
+        let is_target = stack.len() == 1;
+
+        if is_target {
+            let child = {
+                let mut children = self.children.write();
+                children
+                    .entry(value.clone())
+                    .or_insert_with(|| Arc::new(Node::new(Arc::new(self.handler.new_instance()))))
+                    .clone()
+            };
+            f(&child.handler);
+            return Ok(());
+        }
+
+        let children = self.children.read();
+        let Some(child) = children.get(value) else {
+            return Err(format!(
+                "parent node missing at depth {depth}: feature '{}' has no child for value '{value:?}' \
+                 — nodes must be initialized in depth order (root first)",
+                feat.key,
+            ));
+        };
+        let child = child.clone();
+        drop(children);
+
+        child.with_node(&stack[1..], f, depth + 1)
+    }
+
     pub(crate) fn size(&self, leaf_only: bool) -> u32 {
         let children = self.children.read();
 

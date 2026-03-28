@@ -18,11 +18,20 @@ impl Clone for MaxValueHandler {
     }
 }
 
+#[allow(dead_code)]
 impl MaxValueHandler {
     pub fn new() -> Self {
         MaxValueHandler {
             total: Mutex::new(0),
         }
+    }
+
+    pub fn get(&self) -> u32 {
+        *self.total.lock().unwrap()
+    }
+
+    pub fn set(&self, val: u32) {
+        *self.total.lock().unwrap() = val;
     }
 }
 
