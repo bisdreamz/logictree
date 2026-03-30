@@ -278,27 +278,6 @@ where
             .should_prune()
     }
 
-    /// Access the handler at a specific node in the tree.
-    ///
-    /// Traverses the feature path to reach the target node and calls `f`
-    /// with a reference to its handler. Creates the target node if it
-    /// doesn't exist (with `new_instance()` handler). Returns `Err` if
-    /// any intermediate (parent) node along the path is missing — callers
-    /// must create nodes in depth order (root first, then deeper).
-    ///
-    /// Use an empty feature slice to access the root handler.
-    pub fn with_node<F>(&self, features: &[Feature], f: &F) -> Result<(), String>
-    where
-        F: Fn(&H),
-    {
-        self.validate(features)?;
-
-        self.root
-            .get(&Self::root_value())
-            .expect("should have root node!")
-            .with_node(features, f, 0)
-    }
-
     /// Return the count of nodes in this tree.
     /// If `leaf_only` is true, counts only leaf nodes (no children).
     pub fn size(&self, leaf_only: bool) -> u32 {
