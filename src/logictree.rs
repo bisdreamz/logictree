@@ -299,22 +299,6 @@ where
             .with_node(features, f, 0)
     }
 
-    /// Walk every node in the tree, calling `f` with the accumulated
-    /// feature value path and a reference to the handler. Root receives
-    /// an empty path, depth-1 nodes receive `[value]`, etc.
-    ///
-    /// Path is accumulated on the stack during traversal — zero
-    /// per-node storage overhead.
-    pub fn for_each<F>(&self, f: &F)
-    where
-        F: Fn(&[Value], &H),
-    {
-        self.root
-            .get(&Self::root_value())
-            .expect("should have root node!")
-            .for_each(&mut Vec::new(), f);
-    }
-
     /// Return the count of nodes in this tree.
     /// If `leaf_only` is true, counts only leaf nodes (no children).
     pub fn size(&self, leaf_only: bool) -> u32 {

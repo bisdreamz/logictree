@@ -163,22 +163,6 @@ where
         child.with_node(&stack[1..], f, depth + 1)
     }
 
-    /// Walk this node and all descendants, calling `f` with the
-    /// accumulated feature path and handler at each node. Path is
-    /// built on the stack during traversal — zero per-node storage.
-    pub(crate) fn for_each<F>(&self, path: &mut Vec<Value>, f: &F)
-    where
-        F: Fn(&[Value], &H),
-    {
-        f(path, &self.handler);
-        let children = self.children.read();
-        for (value, child) in children.iter() {
-            path.push(value.clone());
-            child.for_each(path, f);
-            path.pop();
-        }
-    }
-
     pub(crate) fn size(&self, leaf_only: bool) -> u32 {
         let children = self.children.read();
 
